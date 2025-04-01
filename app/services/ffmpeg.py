@@ -30,14 +30,22 @@ class FFmpegService:
             "-i", f"color=c={request.output.background_color}:s={request.output.resolution.width}x{request.output.resolution.height}:r={request.output.frame_rate}:d={request.output.duration}"
         ])
         
-        # Add video inputs
+        # Add video and image inputs
         input_index = 1  # Background is input 0
         video_elements = []
+        image_elements = []
         
-        for element in request.elements:
+        for i, element in enumerate(request.elements):
             if element.type == ElementType.VIDEO:
                 cmd.extend(["-i", element.source])
                 video_elements.append({
+                    "index": input_index,
+                    "element": element
+                })
+                input_index += 1
+            elif element.type == ElementType.IMAGE:
+                cmd.extend(["-i", element.source])
+                image_elements.append({
                     "index": input_index,
                     "element": element
                 })
@@ -50,6 +58,7 @@ class FFmpegService:
         last_video = "0:v"  # Start with background
         overlay_count = 0
         
+        # Process video elements
         for video_item in video_elements:
             idx = video_item["index"]
             element = video_item["element"]
@@ -73,6 +82,33 @@ class FFmpegService:
             )
             
             last_video = f"ov{overlay_count}"
+            overlay_count += 1
+        
+        # Process image elements
+        for image_item in image_elements:
+            idx = image_item["index"]
+            element = image_item["element"]
+            
+            # Extract parameters
+            start_time = element.timeline.start
+            duration = element.timeline.duration
+            
+            # Default values if not provided
+            scale = element.transform.scale if hasattr(element, 'transform') and element.transform and element.transform.scale else 1.0
+            x_pos = element.transform.position.x if hasattr(element, 'transform') and element.transform and element.transform.position and isinstance(element.transform.position.x, int) else 0
+            y_pos = element.transform.position.y if hasattr(element, 'transform') and element.transform and element.transform.position and isinstance(element.transform.position.y, int) else 0
+            
+            # Scale the image
+            filter_parts.append(
+                f"[{idx}:v]scale=iw*{scale}:ih*{scale}[img{idx}];"
+            )
+            
+            # Add overlay with timing
+            filter_parts.append(
+                f"[{last_video}][img{idx}]overlay=x={x_pos}:y={y_pos}:enable='between(t,{start_time},{start_time+duration})'[img_ov{overlay_count}];"
+            )
+            
+            last_video = f"img_ov{overlay_count}"
             overlay_count += 1
         
         # Process text elements
