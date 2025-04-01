@@ -1,7 +1,7 @@
 # app/main.py
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from app.routers import clips, template
+from app.routers import clips, template, template_clip
 import os
 
 app = FastAPI()
@@ -13,3 +13,4 @@ app.mount("/jobs", StaticFiles(directory=jobs_dir), name="jobs")
 
 app.include_router(clips.router)
 app.include_router(template.router)
+app.include_router(template_clip.router)

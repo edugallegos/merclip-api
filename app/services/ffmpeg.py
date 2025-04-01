@@ -1,6 +1,7 @@
 import os
 import json
 import shlex
+import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from ..models.video import VideoRequest, ElementType, JobStatus
@@ -14,6 +15,64 @@ class FFmpegService:
         r, g, b, a = map(float, rgba.split(','))
         # Convert to hex
         return f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+
+    @staticmethod
+    async def render_video(job_id: str, command: List[str]):
+        """Background task to render the video."""
+        try:
+            # Log the full command for debugging
+            command_str = " ".join(command)
+            print(f"Executing FFmpeg command: {command_str}")
+            
+            # Write command to debug log in job folder
+            debug_log_path = os.path.join(FFmpegService.get_job_dir(job_id), "command.log")
+            with open(debug_log_path, "w") as f:
+                f.write(command_str)
+            
+            # Execute FFmpeg command with command list
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            # Wait for the process to complete
+            stdout, stderr = await process.communicate()
+            stdout_text = stdout.decode()
+            stderr_text = stderr.decode()
+            
+            # Write output to log files
+            stdout_path = os.path.join(FFmpegService.get_job_dir(job_id), "stdout.log")
+            stderr_path = os.path.join(FFmpegService.get_job_dir(job_id), "stderr.log")
+            
+            with open(stdout_path, "w") as f:
+                f.write(stdout_text)
+            
+            with open(stderr_path, "w") as f:
+                f.write(stderr_text)
+            
+            if process.returncode != 0:
+                # Update status to failed
+                error_msg = stderr_text
+                FFmpegService.update_job_status(job_id, JobStatus.FAILED, error_msg)
+                print(f"Error rendering video for job {job_id}: {error_msg}")
+            else:
+                # Check if output file exists and has content
+                output_path = FFmpegService.get_output_path(job_id)
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    # Update status to completed
+                    FFmpegService.update_job_status(job_id, JobStatus.COMPLETED)
+                    print(f"Successfully rendered video for job {job_id}")
+                else:
+                    error_msg = "FFmpeg executed successfully but output file is empty or missing"
+                    FFmpegService.update_job_status(job_id, JobStatus.FAILED, error_msg)
+                    print(f"Error with output file for job {job_id}: {error_msg}")
+                
+        except Exception as e:
+            # Update status to failed
+            error_msg = str(e)
+            FFmpegService.update_job_status(job_id, JobStatus.FAILED, error_msg)
+            print(f"Exception while rendering video for job {job_id}: {error_msg}")
 
     @staticmethod
     def generate_command(request: VideoRequest, output_path: str) -> List[str]:
@@ -55,7 +114,7 @@ class FFmpegService:
         filter_parts = []
         
         # Process video elements first
-        last_video = "0:v"  # Start with background
+        last_video = "0:v"
         overlay_count = 0
         
         # Process video elements
@@ -203,6 +262,11 @@ class FFmpegService:
         return os.path.join(FFmpegService.get_job_dir(job_id), "status.json")
 
     @staticmethod
+    def get_output_path(job_id: str) -> str:
+        """Get the output file path for a job."""
+        return os.path.join(FFmpegService.get_job_dir(job_id), "output.mp4")
+
+    @staticmethod
     def save_job(request: VideoRequest, job_id: str) -> str:
         """Save the job input to a file."""
         # Create jobs directory if it doesn't exist
@@ -230,37 +294,31 @@ class FFmpegService:
         return input_path
 
     @staticmethod
-    def update_job_status(job_id: str, status: JobStatus, error: Optional[str] = None) -> None:
-        """Update the status of a job."""
-        status_path = FFmpegService.get_status_path(job_id)
-        if not os.path.exists(status_path):
-            return
-
-        with open(status_path, "r") as f:
-            job_status = json.load(f)
-
-        job_status["status"] = status
-        if status == JobStatus.COMPLETED:
-            job_status["completed_at"] = datetime.utcnow().isoformat()
-            job_status["output_url"] = f"/jobs/{job_id}/output.mp4"
-        elif status == JobStatus.FAILED:
-            job_status["completed_at"] = datetime.utcnow().isoformat()
-            job_status["error"] = error
-
-        with open(status_path, "w") as f:
-            json.dump(job_status, f, indent=2)
-
-    @staticmethod
-    def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
-        """Get the current status of a job."""
+    def get_job_status(job_id: str) -> Dict[str, Any]:
+        """Get the status of a job."""
         status_path = FFmpegService.get_status_path(job_id)
         if not os.path.exists(status_path):
             return None
-
+        
         with open(status_path, "r") as f:
             return json.load(f)
 
     @staticmethod
-    def get_output_path(job_id: str) -> str:
-        """Get the output path for a job."""
-        return os.path.join(os.getcwd(), "jobs", job_id, "output.mp4") 
+    def update_job_status(job_id: str, status: JobStatus, error: Optional[str] = None):
+        """Update the status of a job."""
+        status_path = FFmpegService.get_status_path(job_id)
+        if not os.path.exists(status_path):
+            return
+        
+        with open(status_path, "r") as f:
+            job_status = json.load(f)
+        
+        job_status["status"] = status
+        if error:
+            job_status["error"] = error
+        if status == JobStatus.COMPLETED:
+            job_status["completed_at"] = datetime.utcnow().isoformat()
+            job_status["output_url"] = f"/jobs/{job_id}/output.mp4"
+        
+        with open(status_path, "w") as f:
+            json.dump(job_status, f, indent=2, ensure_ascii=False) 

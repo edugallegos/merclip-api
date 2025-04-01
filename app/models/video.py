@@ -6,6 +6,7 @@ class ElementType(str, Enum):
     VIDEO = "video"
     TEXT = "text"
     AUDIO = "audio"
+    IMAGE = "image"
 
 class JobStatus(str, Enum):
     PROCESSING = "processing"
@@ -59,8 +60,8 @@ class Element(BaseModel):
         if 'type' in values:
             if values['type'] == ElementType.TEXT and not v:
                 raise ValueError('text is required for text elements')
-            if values['type'] in [ElementType.VIDEO, ElementType.AUDIO] and not v:
-                raise ValueError('source is required for video and audio elements')
+            if values['type'] in [ElementType.VIDEO, ElementType.AUDIO, ElementType.IMAGE] and not v:
+                raise ValueError('source is required for video, audio, and image elements')
         return v
 
     @validator('style')
