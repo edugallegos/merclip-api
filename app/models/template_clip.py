@@ -1,5 +1,5 @@
-from typing import List, Optional, Dict, Any, Union
-from pydantic import BaseModel, Field, validator
+from typing import List, Optional, Dict, Any, Union, Type, Callable
+from pydantic import BaseModel, Field, validator, root_validator
 from enum import Enum
 
 class ElementType(str, Enum):
@@ -55,6 +55,116 @@ class Style(BaseModel):
     background_color: Optional[str] = None
     alignment: Optional[str] = None
 
+class SpecialProperties:
+    """Handler for special shorthand properties in elements.
+    
+    This class defines special shorthand properties that can be used in template-clip
+    elements for easier video creation. Each special property has a registration and 
+    a handler function that transforms it into standard element properties.
+    
+    New special properties can be easily added by creating a new handler method and
+    registering it in the HANDLERS dictionary.
+    """
+    
+    @staticmethod
+    def handle_position(element_dict: Dict[str, Any], value: str) -> Dict[str, Any]:
+        """Handle position shorthand property.
+        
+        Converts a simple string position value into a full transform.position object.
+        
+        Args:
+            element_dict: The element dictionary to modify
+            value: The position value as a string
+            
+        Returns:
+            The modified element dictionary
+        """
+        if not value:
+            return element_dict
+            
+        # Create transform if it doesn't exist
+        if 'transform' not in element_dict:
+            element_dict['transform'] = {}
+            
+        # Create position in transform
+        element_dict['transform']['position'] = {
+            'x': value,
+            'y': value
+        }
+        
+        return element_dict
+    
+    @staticmethod
+    def handle_size(element_dict: Dict[str, Any], value: Union[int, str]) -> Dict[str, Any]:
+        """Handle size shorthand property.
+        
+        Converts a simple size value into a scale transform property.
+        
+        Args:
+            element_dict: The element dictionary to modify
+            value: The size value as an int or a string like "small", "medium", "large"
+            
+        Returns:
+            The modified element dictionary
+        """
+        if not value:
+            return element_dict
+            
+        # Map string sizes to scale values
+        size_map = {
+            "tiny": 0.25,
+            "small": 0.5,
+            "medium": 1.0,
+            "large": 1.5,
+            "huge": 2.0
+        }
+        
+        # Get the scale value
+        scale = value if isinstance(value, (int, float)) else size_map.get(value, 1.0)
+            
+        # Create transform if it doesn't exist
+        if 'transform' not in element_dict:
+            element_dict['transform'] = {}
+            
+        # Set scale in transform
+        element_dict['transform']['scale'] = scale
+        
+        return element_dict
+    
+    # Registry of special property handlers
+    # This makes it easy to add new special properties in the future
+    HANDLERS = {
+        'position': handle_position,
+        'size': handle_size,
+        # Add more special properties here
+    }
+    
+    @classmethod
+    def process(cls, element_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Process all special properties in an element.
+        
+        This method looks for special properties in the element dictionary
+        and applies the corresponding handlers to transform them into
+        standard element properties.
+        
+        Args:
+            element_dict: Raw element dictionary with potential special properties
+            
+        Returns:
+            Processed element dictionary with special properties transformed
+        """
+        result = element_dict.copy()
+        
+        # Process each registered special property
+        for prop_name, handler in cls.HANDLERS.items():
+            if prop_name in result:
+                # Apply the handler and remove the special property
+                value = result.pop(prop_name)
+                # Call the static method correctly without passing cls
+                result = handler(result, value)
+                
+        return result
+
 class Element(BaseModel):
     """Element model for template-based clip requests.
     
@@ -65,6 +175,7 @@ class Element(BaseModel):
     Special properties:
     - position: A string shorthand for positioning elements (e.g., "center", "top-left").
                 This is converted to a full Transform.position object during processing.
+    - size: A shorthand for scale. Can be a number or string like "small", "medium", "large".
     
     Standard properties follow the VideoRequest element structure, and all optional 
     properties will use template defaults if not specified.
@@ -80,9 +191,13 @@ class Element(BaseModel):
     volume: Optional[float] = None
     fade_in: Optional[float] = None
     fade_out: Optional[float] = None
-    # Simple position helper - special property
+    
+    # Special shorthand properties
     position: Optional[str] = None  # Can be "center", "top", "bottom", "left", "right", etc.
-
+    size: Optional[Union[float, str]] = None  # Can be a number or "small", "medium", "large"
+    
+    # Add more special properties here as needed
+    
     @validator('source', 'text')
     def validate_source_text(cls, v, values):
         """Validate that source or text is provided based on element type."""
@@ -92,15 +207,20 @@ class Element(BaseModel):
             if values['type'] in [ElementType.VIDEO, ElementType.AUDIO, ElementType.IMAGE] and not v:
                 raise ValueError('source is required for video, audio, and image elements')
         return v
+    
+    def process_special_properties(self) -> Dict[str, Any]:
+        """Process all special properties and return a standard element dictionary.
         
-    @validator('transform')
-    def set_transform_from_position(cls, v, values):
-        """Create transform from position shorthand if transform not provided."""
-        # If position shorthand is provided but transform is not, create transform
-        if not v and 'position' in values and values['position']:
-            position = Position(x=values['position'], y=values['position'])
-            return Transform(position=position)
-        return v
+        This method converts all special shorthand properties to their standard form.
+        
+        Returns:
+            Dict with all special properties processed into standard format
+        """
+        # Convert to dict first
+        element_dict = self.dict(exclude_unset=True)
+        
+        # Use the SpecialProperties processor to handle all special properties
+        return SpecialProperties.process(element_dict)
 
 class TemplateClipRequest(BaseModel):
     template_id: str

@@ -353,9 +353,11 @@ When you submit elements via the `/template-clip` endpoint:
 
 ### Special Properties
 
-The template system supports special properties that make it easier to create videos:
+The template system supports special shorthand properties that make it easier to create videos. These properties are processed automatically and converted to their standard format.
 
-#### Position Shorthand
+#### Available Special Properties
+
+##### Position Shorthand
 
 Instead of specifying the full transform with x and y coordinates, you can use the `position` shorthand:
 
@@ -389,9 +391,63 @@ Available position presets:
 - Corner positions: `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`
 - Mid positions: `"mid-top"`, `"mid-bottom"`
 
-### Example: Using Template with Minimal Elements
+##### Size Shorthand
 
-When using a template, you only need to specify the unique properties for each element:
+Instead of specifying a scale transform, you can use the `size` shorthand:
+
+```json
+{
+  "type": "image",
+  "source": "https://example.com/logo.png",
+  "timeline": { "start": 0, "duration": 5 },
+  "size": "small"  // Special property that sets transform.scale to 0.5
+}
+```
+
+This is equivalent to:
+
+```json
+{
+  "type": "image",
+  "source": "https://example.com/logo.png",
+  "timeline": { "start": 0, "duration": 5 },
+  "transform": {
+    "scale": 0.5
+  }
+}
+```
+
+Available size presets:
+- `"tiny"`: scale = 0.25
+- `"small"`: scale = 0.5
+- `"medium"`: scale = 1.0 (original size)
+- `"large"`: scale = 1.5
+- `"huge"`: scale = 2.0
+
+You can also specify a numeric value directly:
+
+```json
+{
+  "type": "image",
+  "source": "https://example.com/logo.png",
+  "timeline": { "start": 0, "duration": 5 },
+  "size": 0.75  // Sets transform.scale to 0.75
+}
+```
+
+#### Extending Special Properties
+
+The special properties system is designed to be extensible. New special properties can be added by:
+
+1. Adding the property to the `Element` model in `app/models/template_clip.py`
+2. Creating a handler function in the `SpecialProperties` class
+3. Registering the handler in the `HANDLERS` dictionary
+
+This allows for easy addition of new shorthand properties without changing the core logic of the template system.
+
+### Example: Using Template with Special Properties
+
+When using a template, you can combine multiple special properties for concise element definitions:
 
 ```json
 {
@@ -406,21 +462,27 @@ When using a template, you only need to specify the unique properties for each e
       }
     },
     {
+      "type": "image",
+      "source": "https://example.com/logo.png",
+      "timeline": {
+        "start": 0,
+        "duration": 5
+      },
+      "position": "top-right",
+      "size": "small"
+    },
+    {
       "type": "text",
       "text": "Amazing Views",
       "timeline": {
         "start": 0,
         "duration": 5
       },
-      "position": "top"  // Using position shorthand
+      "position": "bottom"
     }
   ]
 }
 ```
-
-The resulting video will have:
-- The video element with default transform properties from the template
-- The text element positioned at the top, using the template's default font, size, color, etc.
 
 ## Development
 

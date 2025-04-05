@@ -25,7 +25,7 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
     """Transform template and elements into a VideoRequest.
     
     This function merges user-provided elements with template defaults.
-    Special properties like 'position' are handled to convert from simplified
+    Special properties like 'position', 'size', etc. are handled to convert from simplified
     notation to the full template format.
     
     Args:
@@ -53,6 +53,9 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
         element_type = element.type
         template_defaults = template["defaults"].get(element_type.value, {})
         
+        # Process special properties first
+        processed_element = element.process_special_properties()
+        
         # Create base element with required fields
         transformed_element = {
             "type": element_type,
@@ -66,56 +69,50 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
         elif element_type == ElementType.TEXT:
             transformed_element["text"] = element.text
         
-        # ----- Handle special properties and transformations -----
+        # ----- Handle transforms and element-specific properties -----
         
-        # 1. Position shorthand handling - special property
-        if hasattr(element, 'position') and element.position:
-            # Create transform with position from shorthand
-            position = {"x": element.position, "y": element.position}
-            transformed_element["transform"] = {"position": position}
-        # 2. Transform handling for non-audio elements
-        elif element_type != ElementType.AUDIO:
+        # Only add transform for non-audio elements
+        if element_type != ElementType.AUDIO:
             # Start with template defaults for transform
             template_transform = template_defaults.get("transform", {})
             
             # Apply user-provided transform properties if available
-            if hasattr(element, 'transform') and element.transform:
-                transform_dict = element.transform.dict(exclude_unset=True)
+            if "transform" in processed_element:
+                user_transform = processed_element["transform"]
                 
                 # If user provided a position, merge it with template position
-                if 'position' in transform_dict:
-                    user_position = transform_dict.pop('position')
-                    template_position = template_transform.get('position', {})
+                if "position" in user_transform:
+                    user_position = user_transform.pop("position", {})
+                    template_position = template_transform.get("position", {})
                     
                     # Create merged position
                     merged_position = template_position.copy()
-                    if user_position:
-                        for key, value in user_position.items():
-                            if value is not None:
-                                merged_position[key] = value
+                    for key, value in user_position.items():
+                        if value is not None:
+                            merged_position[key] = value
                     
                     # Update template transform with merged position
                     template_transform_copy = template_transform.copy()
-                    template_transform_copy['position'] = merged_position
+                    template_transform_copy["position"] = merged_position
                     
                     # Apply remaining transform properties
-                    for key, value in transform_dict.items():
+                    for key, value in user_transform.items():
                         if value is not None:
                             template_transform_copy[key] = value
                     
                     transformed_element["transform"] = template_transform_copy
                 else:
                     # Just merge the transforms
-                    merged_transform = {**template_transform, **transform_dict}
+                    merged_transform = {**template_transform, **user_transform}
                     transformed_element["transform"] = merged_transform
             else:
                 # No user transform, use template defaults
                 transformed_element["transform"] = template_transform
         
-        # 3. Handle audio-specific properties
+        # Handle audio-specific properties
         if element_type == ElementType.AUDIO:
             # Add audio properties with template defaults and user overrides
-            for prop in ['volume', 'fade_in', 'fade_out']:
+            for prop in ["volume", "fade_in", "fade_out"]:
                 user_value = getattr(element, prop, None)
                 default_value = template_defaults.get(prop)
                 
@@ -125,12 +122,12 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
                 elif default_value is not None:
                     transformed_element[prop] = default_value
         
-        # 4. Handle video-specific properties
+        # Handle video-specific properties
         if element_type == ElementType.VIDEO:
             # Set audio enabled/disabled
             transformed_element["audio"] = template_defaults.get("audio", True)
         
-        # 5. Handle text-specific style properties
+        # Handle text-specific style properties
         if element_type == ElementType.TEXT:
             # Start with template style defaults
             style_defaults = template_defaults.get("style", {})
@@ -143,7 +140,7 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
             }
             
             # Override with user-provided style if available
-            if hasattr(element, 'style') and element.style:
+            if hasattr(element, "style") and element.style:
                 user_style = element.style.dict(exclude_unset=True)
                 for key, value in user_style.items():
                     if value is not None:
