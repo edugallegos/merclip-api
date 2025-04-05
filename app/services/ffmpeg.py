@@ -219,12 +219,17 @@ class FFmpegService:
                 # Extract parameters
                 start_time = element.timeline.start
                 duration = element.timeline.duration
+                end_time = start_time + duration
                 volume = getattr(element, 'volume', 1.0)
                 fade_in = getattr(element, 'fade_in', 0)
                 fade_out = getattr(element, 'fade_out', 0)
                 
-                # Build audio filter
+                # Build audio filter string
+                # Start with the audio source
                 audio_filter = f"[{idx}:a]"
+                
+                # Trim to the specified duration
+                audio_filter += f"atrim=0:{duration},asetpts=PTS-STARTPTS,"
                 
                 # Add volume adjustment if needed
                 if volume != 1.0:
@@ -236,28 +241,28 @@ class FFmpegService:
                 if fade_out > 0:
                     audio_filter += f"afade=t=out:st={duration-fade_out}:d={fade_out},"
                 
-                # Trim to specified duration
-                audio_filter += f"atrim=0:{duration},asetpts=PTS-STARTPTS"
-                
-                # Add silence padding for start time if needed
+                # Use adelay to position the audio at the right start point
                 if start_time > 0:
-                    audio_filter += f",adelay={int(start_time*1000)}|{int(start_time*1000)}"
+                    audio_filter += f"adelay={int(start_time*1000)}|{int(start_time*1000)},"
                 
-                # Add output label
-                audio_filter += f"[a{idx}];"
+                # Make sure we pad to the full duration
+                audio_filter += f"apad=whole_dur={request.output.duration},"
+                
+                # Set the presentation timestamp
+                audio_filter += f"asetpts=PTS-STARTPTS[a{idx}];"
                 
                 audio_filters.append(audio_filter)
             
-            # Add amix filter if needed
+            # Merge all audio streams if needed
             if len(audio_elements) > 1:
                 audio_inputs = "".join([f"[a{item['index']}]" for item in audio_elements])
                 audio_filters.append(
-                    f"{audio_inputs}amix=inputs={len(audio_elements)}:dropout_transition=0[aout];"
+                    f"{audio_inputs}amix=inputs={len(audio_elements)}:normalize=0[aout];"
                 )
             else:
                 # Single audio - just rename
                 audio_filters.append(
-                    f"[a{audio_elements[0]['index']}]asetpts=PTS-STARTPTS[aout];"
+                    f"[a{audio_elements[0]['index']}]acopy[aout];"
                 )
         
         # If we have any filters, add the filter_complex
