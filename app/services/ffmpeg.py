@@ -209,46 +209,68 @@ class FFmpegService:
         
         # Process audio elements
         audio_filters = []
-        for audio_item in audio_elements:
-            idx = audio_item["index"]
-            element = audio_item["element"]
+        
+        if audio_elements:
+            # Process each audio element individually
+            for audio_item in audio_elements:
+                idx = audio_item["index"]
+                element = audio_item["element"]
+                
+                # Extract parameters
+                start_time = element.timeline.start
+                duration = element.timeline.duration
+                volume = getattr(element, 'volume', 1.0)
+                fade_in = getattr(element, 'fade_in', 0)
+                fade_out = getattr(element, 'fade_out', 0)
+                
+                # Build audio filter
+                audio_filter = f"[{idx}:a]"
+                
+                # Add volume adjustment if needed
+                if volume != 1.0:
+                    audio_filter += f"volume={volume},"
+                
+                # Add fade in/out
+                if fade_in > 0:
+                    audio_filter += f"afade=t=in:st=0:d={fade_in},"
+                if fade_out > 0:
+                    audio_filter += f"afade=t=out:st={duration-fade_out}:d={fade_out},"
+                
+                # Trim to specified duration
+                audio_filter += f"atrim=0:{duration},asetpts=PTS-STARTPTS"
+                
+                # Add silence padding for start time if needed
+                if start_time > 0:
+                    audio_filter += f",adelay={int(start_time*1000)}|{int(start_time*1000)}"
+                
+                # Add output label
+                audio_filter += f"[a{idx}];"
+                
+                audio_filters.append(audio_filter)
             
-            # Extract parameters
-            start_time = element.timeline.start
-            duration = element.timeline.duration
-            volume = getattr(element, 'volume', 1.0)
-            fade_in = getattr(element, 'fade_in', 0)
-            fade_out = getattr(element, 'fade_out', 0)
-            
-            # Build audio filter
-            audio_filter = f"[{idx}:a]"
-            
-            # Add volume
-            if volume != 1.0:
-                audio_filter += f"volume={volume},"
-            
-            # Add fade in/out
-            if fade_in > 0:
-                audio_filter += f"afade=t=in:st={start_time}:d={fade_in},"
-            if fade_out > 0:
-                audio_filter += f"afade=t=out:st={start_time+duration-fade_out}:d={fade_out},"
-            
-            # Add timing
-            audio_filter += f"atrim={start_time}:{start_time+duration},asetpts=PTS-STARTPTS[a{idx}]"
-            
-            audio_filters.append(audio_filter)
+            # Add amix filter if needed
+            if len(audio_elements) > 1:
+                audio_inputs = "".join([f"[a{item['index']}]" for item in audio_elements])
+                audio_filters.append(
+                    f"{audio_inputs}amix=inputs={len(audio_elements)}:dropout_transition=0[aout];"
+                )
+            else:
+                # Single audio - just rename
+                audio_filters.append(
+                    f"[a{audio_elements[0]['index']}]asetpts=PTS-STARTPTS[aout];"
+                )
         
         # If we have any filters, add the filter_complex
         if filter_parts or audio_filters:
+            # Combine all filters with proper semicolon separation
             filter_complex = "".join(filter_parts + audio_filters).rstrip(";")
+            
             cmd.extend(["-filter_complex", filter_complex])
             cmd.extend(["-map", f"[{last_video}]"])
             
             # Map audio streams
-            if audio_filters:
-                for audio_item in audio_elements:
-                    idx = audio_item["index"]
-                    cmd.extend(["-map", f"[a{idx}]"])
+            if audio_elements:
+                cmd.extend(["-map", "[aout]"])
             elif any(e.type == ElementType.VIDEO and e.audio for e in request.elements):
                 cmd.extend(["-map", "1:a?"])
         else:
