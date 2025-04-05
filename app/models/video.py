@@ -54,6 +54,10 @@ class Element(BaseModel):
     transform: Optional[Transform] = None
     style: Optional[Style] = None
     audio: Optional[bool] = None
+    # Audio properties
+    volume: Optional[float] = None
+    fade_in: Optional[float] = None
+    fade_out: Optional[float] = None
 
     @validator('source', 'text')
     def validate_source_text(cls, v, values):

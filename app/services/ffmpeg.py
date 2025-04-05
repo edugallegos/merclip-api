@@ -220,9 +220,20 @@ class FFmpegService:
                 start_time = element.timeline.start
                 duration = element.timeline.duration
                 end_time = start_time + duration
-                volume = getattr(element, 'volume', 1.0)
-                fade_in = getattr(element, 'fade_in', 0)
-                fade_out = getattr(element, 'fade_out', 0)
+                
+                # Get volume with proper attribute access
+                volume = 1.0
+                if hasattr(element, 'volume') and element.volume is not None:
+                    volume = float(element.volume)
+                
+                # Get fade properties, ensuring they're not None
+                fade_in = 0
+                if hasattr(element, 'fade_in') and element.fade_in is not None:
+                    fade_in = float(element.fade_in)
+                
+                fade_out = 0
+                if hasattr(element, 'fade_out') and element.fade_out is not None:
+                    fade_out = float(element.fade_out)
                 
                 # Build audio filter string
                 # Start with the audio source
@@ -231,9 +242,8 @@ class FFmpegService:
                 # Trim to the specified duration
                 audio_filter += f"atrim=0:{duration},asetpts=PTS-STARTPTS,"
                 
-                # Add volume adjustment if needed
-                if volume != 1.0:
-                    audio_filter += f"volume={volume},"
+                # Add volume adjustment
+                audio_filter += f"volume={volume:.1f},"
                 
                 # Add fade in/out
                 if fade_in > 0:

@@ -58,9 +58,10 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
             
             # Add audio properties for audio elements
             if element_type == ElementType.AUDIO:
-                transformed_element["volume"] = template_defaults.get("volume", 1.0)
-                transformed_element["fade_in"] = template_defaults.get("fade_in", 0)
-                transformed_element["fade_out"] = template_defaults.get("fade_out", 0)
+                # Use user-provided values first, then fall back to template defaults
+                transformed_element["volume"] = getattr(element, 'volume', template_defaults.get("volume", 1.0))
+                transformed_element["fade_in"] = getattr(element, 'fade_in', template_defaults.get("fade_in", 0))
+                transformed_element["fade_out"] = getattr(element, 'fade_out', template_defaults.get("fade_out", 0))
         else:
             transformed_element["text"] = element.text
         
