@@ -89,10 +89,11 @@ class FFmpegService:
             "-i", f"color=c={request.output.background_color}:s={request.output.resolution.width}x{request.output.resolution.height}:r={request.output.frame_rate}:d={request.output.duration}"
         ])
         
-        # Add video and image inputs
+        # Add video, image, and audio inputs
         input_index = 1  # Background is input 0
         video_elements = []
         image_elements = []
+        audio_elements = []
         
         for i, element in enumerate(request.elements):
             if element.type == ElementType.VIDEO:
@@ -105,6 +106,13 @@ class FFmpegService:
             elif element.type == ElementType.IMAGE:
                 cmd.extend(["-i", element.source])
                 image_elements.append({
+                    "index": input_index,
+                    "element": element
+                })
+                input_index += 1
+            elif element.type == ElementType.AUDIO:
+                cmd.extend(["-i", element.source])
+                audio_elements.append({
                     "index": input_index,
                     "element": element
                 })
@@ -199,15 +207,49 @@ class FFmpegService:
                 
                 last_video = f"txt{i}"
         
+        # Process audio elements
+        audio_filters = []
+        for audio_item in audio_elements:
+            idx = audio_item["index"]
+            element = audio_item["element"]
+            
+            # Extract parameters
+            start_time = element.timeline.start
+            duration = element.timeline.duration
+            volume = getattr(element, 'volume', 1.0)
+            fade_in = getattr(element, 'fade_in', 0)
+            fade_out = getattr(element, 'fade_out', 0)
+            
+            # Build audio filter
+            audio_filter = f"[{idx}:a]"
+            
+            # Add volume
+            if volume != 1.0:
+                audio_filter += f"volume={volume},"
+            
+            # Add fade in/out
+            if fade_in > 0:
+                audio_filter += f"afade=t=in:st={start_time}:d={fade_in},"
+            if fade_out > 0:
+                audio_filter += f"afade=t=out:st={start_time+duration-fade_out}:d={fade_out},"
+            
+            # Add timing
+            audio_filter += f"atrim={start_time}:{start_time+duration},asetpts=PTS-STARTPTS[a{idx}]"
+            
+            audio_filters.append(audio_filter)
+        
         # If we have any filters, add the filter_complex
-        if filter_parts:
-            filter_complex = "".join(filter_parts).rstrip(";")
+        if filter_parts or audio_filters:
+            filter_complex = "".join(filter_parts + audio_filters).rstrip(";")
             cmd.extend(["-filter_complex", filter_complex])
             cmd.extend(["-map", f"[{last_video}]"])
             
-            # If we have video with audio, try to map it
-            # But make it optional with a question mark to avoid errors if missing
-            if any(e.type == ElementType.VIDEO and e.audio for e in request.elements):
+            # Map audio streams
+            if audio_filters:
+                for audio_item in audio_elements:
+                    idx = audio_item["index"]
+                    cmd.extend(["-map", f"[a{idx}]"])
+            elif any(e.type == ElementType.VIDEO and e.audio for e in request.elements):
                 cmd.extend(["-map", "1:a?"])
         else:
             # If we only have text overlays, use simpler vf approach
@@ -243,7 +285,7 @@ class FFmpegService:
         ])
         
         # Add audio codec if needed
-        if any(e.type == ElementType.VIDEO and e.audio for e in request.elements):
+        if audio_filters or any(e.type == ElementType.VIDEO and e.audio for e in request.elements):
             cmd.extend(["-c:a", "aac", "-b:a", "128k"])
         
         # Add output file
