@@ -183,8 +183,46 @@ class FFmpegService:
             if element.type == ElementType.TEXT:
                 # Get text positioning
                 x_pos = element.transform.position.x
+                y_pos = element.transform.position.y
+                
+                # Handle different position presets
                 if x_pos == "center":
                     x_pos = "(w-text_w)/2"
+                elif x_pos == "left":
+                    x_pos = "10"
+                elif x_pos == "right":
+                    x_pos = "w-text_w-10"
+                
+                if y_pos == "center":
+                    y_pos = "(h-text_h)/2"
+                elif y_pos == "top":
+                    y_pos = "10"
+                elif y_pos == "bottom":
+                    y_pos = "h-text_h-10"
+                elif y_pos == "mid-top":
+                    y_pos = "h/4-text_h/2"
+                elif y_pos == "mid-bottom":
+                    y_pos = "3*h/4-text_h/2"
+                
+                # Handle combined position presets
+                if element.transform.position.x == "top-left" or element.transform.position.y == "top-left":
+                    x_pos = "10"
+                    y_pos = "10"
+                elif element.transform.position.x == "top-right" or element.transform.position.y == "top-right":
+                    x_pos = "w-text_w-10"
+                    y_pos = "10"
+                elif element.transform.position.x == "bottom-left" or element.transform.position.y == "bottom-left":
+                    x_pos = "10"
+                    y_pos = "h-text_h-10"
+                elif element.transform.position.x == "bottom-right" or element.transform.position.y == "bottom-right":
+                    x_pos = "w-text_w-10"
+                    y_pos = "h-text_h-10"
+                elif element.transform.position.x == "mid-top" or element.transform.position.y == "mid-top":
+                    x_pos = "(w-text_w)/2"
+                    y_pos = "h/4-text_h/2"
+                elif element.transform.position.x == "mid-bottom" or element.transform.position.y == "mid-bottom":
+                    x_pos = "(w-text_w)/2"
+                    y_pos = "3*h/4-text_h/2"
                 
                 # Handle background color
                 if element.style.background_color:
@@ -192,7 +230,7 @@ class FFmpegService:
                         box_color = FFmpegService.rgba_to_hex(element.style.background_color)
                     else:
                         box_color = element.style.background_color
-                    box_param = f":box=1:boxcolor={box_color}"
+                    box_param = f":box=1:boxcolor={box_color}:boxborderw=5"
                 else:
                     box_param = ""
                 
@@ -200,9 +238,16 @@ class FFmpegService:
                 start_time = element.timeline.start
                 duration = element.timeline.duration
                 
-                # Add text overlay with timing
+                # Get font style
+                font_family = element.style.font_family if element.style.font_family else "Arial"
+                font_params = f":fontfile='{font_family}'" if os.path.exists(font_family) else ""
+                
+                # Add text shadow for better readability
+                shadow_params = ":shadowcolor=black:shadowx=2:shadowy=2"
+                
+                # Add text overlay with timing and enhanced styling
                 filter_parts.append(
-                    f"[{last_video}]drawtext=text='{element.text}':fontsize={element.style.font_size}:fontcolor={element.style.color}{box_param}:x={x_pos}:y={element.transform.position.y}:enable='between(t,{start_time},{start_time+duration})'[txt{i}];"
+                    f"[{last_video}]drawtext=text='{element.text}':fontsize={element.style.font_size}:fontcolor={element.style.color}{font_params}{box_param}{shadow_params}:x={x_pos}:y={y_pos}:enable='between(t,{start_time},{start_time+duration})'[txt{i}];"
                 )
                 
                 last_video = f"txt{i}"

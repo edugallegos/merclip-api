@@ -48,8 +48,13 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
             "timeline": element.timeline.dict()
         }
         
+        # Handle position shorthand if provided
+        if hasattr(element, 'position') and element.position:
+            # Create transform with position from shorthand
+            position = {"x": element.position, "y": element.position}
+            transformed_element["transform"] = {"position": position}
         # Add transform only for non-audio elements
-        if element_type != ElementType.AUDIO:
+        elif element_type != ElementType.AUDIO:
             transformed_element["transform"] = template_defaults.get("transform", {})
         
         # Add source or text based on type
@@ -79,6 +84,12 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
                 "alignment": style_defaults.get("alignment", "center"),
                 "background_color": style_defaults.get("background_color", "rgba(0,0,0,0.3)")
             }
+            
+            # Override with user-provided style if available
+            if hasattr(element, 'style') and element.style:
+                for key, value in element.style.dict(exclude_unset=True).items():
+                    if value is not None:
+                        transformed_element["style"][key] = value
         
         transformed_elements.append(transformed_element)
     

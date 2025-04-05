@@ -41,9 +41,9 @@
       },
       "style": {
         "font_family": "Arial",
-        "font_size": 92,
-        "color": "white",
-        "background_color": "rgba(0,0,0,0.3)",
+        "font_size": 96,
+        "color": "#FFFFFF",
+        "background_color": "rgba(0,0,0,0.5)",
         "alignment": "center"
       }
     },

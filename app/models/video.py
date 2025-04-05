@@ -30,8 +30,14 @@ class Timeline(BaseModel):
     in_: Optional[float] = Field(None, ge=0, alias="in")
 
 class Position(BaseModel):
-    x: Union[int, str]
-    y: Union[int, str]
+    x: Union[int, str] = 0
+    y: Union[int, str] = 0
+    
+    @validator('x', 'y')
+    def validate_position(cls, v):
+        if isinstance(v, str) and v not in ["center", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right", "mid-top", "mid-bottom"]:
+            raise ValueError('String position must be one of: center, top, bottom, left, right, top-left, top-right, bottom-left, bottom-right, mid-top, mid-bottom')
+        return v
 
 class Transform(BaseModel):
     scale: Optional[float] = Field(None, gt=0)
