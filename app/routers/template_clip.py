@@ -22,14 +22,26 @@ def load_template(template_id: str) -> Dict[str, Any]:
         return json.load(f)
 
 def transform_to_video_request(template: Dict[str, Any], elements: list[Element]) -> VideoRequest:
-    """Transform template and elements into a VideoRequest."""
+    """Transform template and elements into a VideoRequest.
+    
+    This function merges user-provided elements with template defaults.
+    Special properties like 'position' are handled to convert from simplified
+    notation to the full template format.
+    
+    Args:
+        template: The template definition with defaults
+        elements: User-provided elements to be merged with template defaults
+        
+    Returns:
+        VideoRequest: A complete video request ready for processing
+    """
     # Get the output settings from template
     output = template["output"]
     
     # Calculate total duration from elements
     total_duration = max(
         (elem.timeline.start + elem.timeline.duration for elem in elements),
-        default=0
+        default=output.get("duration", 10)  # Default to template duration or 10 seconds
     )
     
     # Add duration to output
@@ -39,45 +51,90 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
     transformed_elements = []
     for element in elements:
         element_type = element.type
-        template_defaults = template["defaults"].get(element_type, {})
+        template_defaults = template["defaults"].get(element_type.value, {})
         
-        # Create base element with template defaults
+        # Create base element with required fields
         transformed_element = {
             "type": element_type,
             "id": f"{element_type}-{len(transformed_elements)}",
             "timeline": element.timeline.dict()
         }
         
-        # Handle position shorthand if provided
+        # Handle element-type specific properties
+        if element_type in [ElementType.VIDEO, ElementType.IMAGE, ElementType.AUDIO]:
+            transformed_element["source"] = element.source
+        elif element_type == ElementType.TEXT:
+            transformed_element["text"] = element.text
+        
+        # ----- Handle special properties and transformations -----
+        
+        # 1. Position shorthand handling - special property
         if hasattr(element, 'position') and element.position:
             # Create transform with position from shorthand
             position = {"x": element.position, "y": element.position}
             transformed_element["transform"] = {"position": position}
-        # Add transform only for non-audio elements
+        # 2. Transform handling for non-audio elements
         elif element_type != ElementType.AUDIO:
-            transformed_element["transform"] = template_defaults.get("transform", {})
-        
-        # Add source or text based on type
-        if element_type in [ElementType.VIDEO, ElementType.IMAGE, ElementType.AUDIO]:
-            transformed_element["source"] = element.source
+            # Start with template defaults for transform
+            template_transform = template_defaults.get("transform", {})
             
-            # Add audio properties for audio elements
-            if element_type == ElementType.AUDIO:
-                # Use user-provided values first, then fall back to template defaults
-                transformed_element["volume"] = getattr(element, 'volume', template_defaults.get("volume", 1.0))
-                transformed_element["fade_in"] = getattr(element, 'fade_in', template_defaults.get("fade_in", 0))
-                transformed_element["fade_out"] = getattr(element, 'fade_out', template_defaults.get("fade_out", 0))
-        else:
-            transformed_element["text"] = element.text
+            # Apply user-provided transform properties if available
+            if hasattr(element, 'transform') and element.transform:
+                transform_dict = element.transform.dict(exclude_unset=True)
+                
+                # If user provided a position, merge it with template position
+                if 'position' in transform_dict:
+                    user_position = transform_dict.pop('position')
+                    template_position = template_transform.get('position', {})
+                    
+                    # Create merged position
+                    merged_position = template_position.copy()
+                    if user_position:
+                        for key, value in user_position.items():
+                            if value is not None:
+                                merged_position[key] = value
+                    
+                    # Update template transform with merged position
+                    template_transform_copy = template_transform.copy()
+                    template_transform_copy['position'] = merged_position
+                    
+                    # Apply remaining transform properties
+                    for key, value in transform_dict.items():
+                        if value is not None:
+                            template_transform_copy[key] = value
+                    
+                    transformed_element["transform"] = template_transform_copy
+                else:
+                    # Just merge the transforms
+                    merged_transform = {**template_transform, **transform_dict}
+                    transformed_element["transform"] = merged_transform
+            else:
+                # No user transform, use template defaults
+                transformed_element["transform"] = template_transform
         
-        # Add audio property for video elements
+        # 3. Handle audio-specific properties
+        if element_type == ElementType.AUDIO:
+            # Add audio properties with template defaults and user overrides
+            for prop in ['volume', 'fade_in', 'fade_out']:
+                user_value = getattr(element, prop, None)
+                default_value = template_defaults.get(prop)
+                
+                # Use user value if provided, otherwise template default
+                if user_value is not None:
+                    transformed_element[prop] = user_value
+                elif default_value is not None:
+                    transformed_element[prop] = default_value
+        
+        # 4. Handle video-specific properties
         if element_type == ElementType.VIDEO:
+            # Set audio enabled/disabled
             transformed_element["audio"] = template_defaults.get("audio", True)
         
-        # Add style only for text elements
+        # 5. Handle text-specific style properties
         if element_type == ElementType.TEXT:
+            # Start with template style defaults
             style_defaults = template_defaults.get("style", {})
-            transformed_element["style"] = {
+            transformed_style = {
                 "font_family": style_defaults.get("font_family", "Arial"),
                 "font_size": style_defaults.get("font_size", 48),
                 "color": style_defaults.get("color", "white"),
@@ -87,12 +144,16 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
             
             # Override with user-provided style if available
             if hasattr(element, 'style') and element.style:
-                for key, value in element.style.dict(exclude_unset=True).items():
+                user_style = element.style.dict(exclude_unset=True)
+                for key, value in user_style.items():
                     if value is not None:
-                        transformed_element["style"][key] = value
+                        transformed_style[key] = value
+            
+            transformed_element["style"] = transformed_style
         
         transformed_elements.append(transformed_element)
     
+    # Create final VideoRequest
     return VideoRequest(
         output=output,
         elements=transformed_elements

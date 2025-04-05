@@ -331,6 +331,97 @@ Example template structure:
 }
 ```
 
+## Template System
+
+### How Templates Work
+
+Templates provide a way to define default styles, layouts, and behaviors for video elements. When you use the `/template-clip` endpoint, your elements are merged with the template defaults, giving you a consistent look without having to specify every property.
+
+### Template Structure
+
+A template includes:
+- **Output settings**: Resolution, frame rate, background color, etc.
+- **Element defaults**: Default properties for each element type (video, image, text, audio)
+
+### Merging Logic
+
+When you submit elements via the `/template-clip` endpoint:
+
+1. Each element is merged with the corresponding template defaults
+2. Properties you specify override the template defaults
+3. Properties you omit will use the template defaults
+
+### Special Properties
+
+The template system supports special properties that make it easier to create videos:
+
+#### Position Shorthand
+
+Instead of specifying the full transform with x and y coordinates, you can use the `position` shorthand:
+
+```json
+{
+  "type": "text",
+  "text": "Hello World",
+  "timeline": { "start": 0, "duration": 5 },
+  "position": "center"  // Special property that sets both x and y to "center"
+}
+```
+
+This is equivalent to:
+
+```json
+{
+  "type": "text",
+  "text": "Hello World",
+  "timeline": { "start": 0, "duration": 5 },
+  "transform": {
+    "position": {
+      "x": "center",
+      "y": "center"
+    }
+  }
+}
+```
+
+Available position presets:
+- Basic positions: `"center"`, `"top"`, `"bottom"`, `"left"`, `"right"`
+- Corner positions: `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`
+- Mid positions: `"mid-top"`, `"mid-bottom"`
+
+### Example: Using Template with Minimal Elements
+
+When using a template, you only need to specify the unique properties for each element:
+
+```json
+{
+  "template_id": "multi_element_reel",
+  "elements": [
+    {
+      "type": "video",
+      "source": "https://example.com/video.mp4",
+      "timeline": {
+        "start": 0,
+        "duration": 5
+      }
+    },
+    {
+      "type": "text",
+      "text": "Amazing Views",
+      "timeline": {
+        "start": 0,
+        "duration": 5
+      },
+      "position": "top"  // Using position shorthand
+    }
+  ]
+}
+```
+
+The resulting video will have:
+- The video element with default transform properties from the template
+- The text element positioned at the top, using the template's default font, size, color, etc.
+
 ## Development
 
 ### Project Structure
