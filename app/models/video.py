@@ -51,7 +51,7 @@ class Element(BaseModel):
     source: Optional[str] = None
     text: Optional[str] = None
     timeline: Timeline
-    transform: Transform
+    transform: Optional[Transform] = None
     style: Optional[Style] = None
     audio: Optional[bool] = None
 
@@ -68,6 +68,12 @@ class Element(BaseModel):
     def validate_style(cls, v, values):
         if 'type' in values and values['type'] == ElementType.TEXT and not v:
             raise ValueError('style is required for text elements')
+        return v
+
+    @validator('transform')
+    def validate_transform(cls, v, values):
+        if 'type' in values and values['type'] != ElementType.AUDIO and not v:
+            raise ValueError('transform is required for video, image, and text elements')
         return v
 
     @validator('audio')

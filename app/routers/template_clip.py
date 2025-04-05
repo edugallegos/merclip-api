@@ -45,9 +45,12 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
         transformed_element = {
             "type": element_type,
             "id": f"{element_type}-{len(transformed_elements)}",
-            "timeline": element.timeline.dict(),
-            "transform": template_defaults.get("transform", {})
+            "timeline": element.timeline.dict()
         }
+        
+        # Add transform only for non-audio elements
+        if element_type != ElementType.AUDIO:
+            transformed_element["transform"] = template_defaults.get("transform", {})
         
         # Add source or text based on type
         if element_type in [ElementType.VIDEO, ElementType.IMAGE, ElementType.AUDIO]:
