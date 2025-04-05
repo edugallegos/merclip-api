@@ -17,7 +17,7 @@
       "src": "",
       "timeline": { "start": 0, "duration": 5, "in": 0 },
       "transform": {
-        "scale": 1.5,
+        "scale": 1,
         "position": { "x": 0, "y": 0 },
         "opacity": 1.0
       },
@@ -28,8 +28,8 @@
       "src": "",
       "timeline": { "start": 0, "duration": 3 },
       "transform": {
-        "scale": 0.5,
-        "position": { "x": 100, "y": 100 }
+        "scale": 1,
+        "position": { "x": "center", "y": "center" }
       }
     },
     "text": {
