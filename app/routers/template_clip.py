@@ -1,16 +1,90 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from typing import Dict, Any
+from typing import Dict, Any, TypeVar, Union, Optional
 import json
 import os
 from ..models.template_clip import TemplateClipRequest, Element
 from ..models.video import VideoRequest, JobResponse, ElementType
 from ..services.ffmpeg import FFmpegService
 import uuid
+import logging
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/template-clip",
     tags=["template-clip"]
 )
+
+T = TypeVar('T')
+
+def deep_merge(template: Dict[str, Any], user_values: Dict[str, Any]) -> Dict[str, Any]:
+    """Deep merge two dictionaries with nested structures.
+    
+    This function merges user-provided values into a template dictionary,
+    properly handling nested objects by recursively merging them.
+    
+    Args:
+        template: The template dictionary with default values
+        user_values: User-provided values to override the template
+        
+    Returns:
+        A new dictionary with the merged values
+    """
+    result = template.copy()
+    
+    for key, value in user_values.items():
+        # Skip None values
+        if value is None:
+            continue
+            
+        # If both values are dictionaries, recursively merge them
+        if isinstance(value, dict) and key in result and isinstance(result[key], dict):
+            result[key] = deep_merge(result[key], value)
+        else:
+            # Otherwise just override the value
+            result[key] = value
+            
+    return result
+
+def get_property_with_defaults(
+    element: Element,
+    template_defaults: Dict[str, Any], 
+    processed_element: Dict[str, Any],
+    property_name: str
+) -> Dict[str, Any]:
+    """Get a property with merged defaults and user values.
+    
+    This function handles the common pattern of merging template defaults
+    with user-provided values for a specific property group.
+    
+    Priority order:
+    1. Element-specific properties (from element attributes)
+    2. Special properties (from processed_element)
+    3. Template defaults (fallback)
+    
+    Args:
+        element: The element being processed
+        template_defaults: Template defaults for this element type
+        processed_element: Processed element with special properties
+        property_name: The name of the property to process (e.g., "transform", "style")
+        
+    Returns:
+        The merged property dictionary
+    """
+    # Start with template defaults for this property
+    result = template_defaults.get(property_name, {}).copy()
+    
+    # Apply special properties from processed element if available (2nd priority)
+    if property_name in processed_element:
+        result = deep_merge(result, processed_element[property_name])
+    
+    # Apply element attributes if available (highest priority)
+    if hasattr(element, property_name) and getattr(element, property_name) is not None:
+        user_property = getattr(element, property_name).dict(exclude_unset=True)
+        result = deep_merge(result, user_property)
+        
+    return result
 
 def load_template(template_id: str) -> Dict[str, Any]:
     """Load a template from the templates directory."""
@@ -18,8 +92,12 @@ def load_template(template_id: str) -> Dict[str, Any]:
     if not os.path.exists(template_path):
         raise HTTPException(status_code=404, detail=f"Template {template_id} not found")
     
-    with open(template_path, "r") as f:
-        return json.load(f)
+    try:
+        with open(template_path, "r") as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing template {template_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error parsing template: {str(e)}")
 
 def transform_to_video_request(template: Dict[str, Any], elements: list[Element]) -> VideoRequest:
     """Transform template and elements into a VideoRequest.
@@ -73,50 +151,25 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
         
         # Only add transform for non-audio elements
         if element_type != ElementType.AUDIO:
-            # Start with template defaults for transform
-            template_transform = template_defaults.get("transform", {})
-            
-            # Apply user-provided transform properties if available
-            if "transform" in processed_element:
-                user_transform = processed_element["transform"]
-                
-                # If user provided a position, merge it with template position
-                if "position" in user_transform:
-                    user_position = user_transform.pop("position", {})
-                    template_position = template_transform.get("position", {})
-                    
-                    # Create merged position
-                    merged_position = template_position.copy()
-                    for key, value in user_position.items():
-                        if value is not None:
-                            merged_position[key] = value
-                    
-                    # Update template transform with merged position
-                    template_transform_copy = template_transform.copy()
-                    template_transform_copy["position"] = merged_position
-                    
-                    # Apply remaining transform properties
-                    for key, value in user_transform.items():
-                        if value is not None:
-                            template_transform_copy[key] = value
-                    
-                    transformed_element["transform"] = template_transform_copy
-                else:
-                    # Just merge the transforms
-                    merged_transform = {**template_transform, **user_transform}
-                    transformed_element["transform"] = merged_transform
-            else:
-                # No user transform, use template defaults
-                transformed_element["transform"] = template_transform
+            # Get and merge transform properties
+            transformed_element["transform"] = get_property_with_defaults(
+                element, 
+                template_defaults, 
+                processed_element, 
+                "transform"
+            )
         
         # Handle audio-specific properties
         if element_type == ElementType.AUDIO:
-            # Add audio properties with template defaults and user overrides
+            # Add audio properties using the same pattern as other properties
             for prop in ["volume", "fade_in", "fade_out"]:
-                user_value = getattr(element, prop, None)
+                # Get template default first
                 default_value = template_defaults.get(prop)
                 
-                # Use user value if provided, otherwise template default
+                # Check if user provided a value
+                user_value = getattr(element, prop, None)
+                
+                # Apply user value if available, otherwise use template default
                 if user_value is not None:
                     transformed_element[prop] = user_value
                 elif default_value is not None:
@@ -129,24 +182,13 @@ def transform_to_video_request(template: Dict[str, Any], elements: list[Element]
         
         # Handle text-specific style properties
         if element_type == ElementType.TEXT:
-            # Start with template style defaults
-            style_defaults = template_defaults.get("style", {})
-            transformed_style = {
-                "font_family": style_defaults.get("font_family", "Arial"),
-                "font_size": style_defaults.get("font_size", 48),
-                "color": style_defaults.get("color", "white"),
-                "alignment": style_defaults.get("alignment", "center"),
-                "background_color": style_defaults.get("background_color", "rgba(0,0,0,0.3)")
-            }
-            
-            # Override with user-provided style if available
-            if hasattr(element, "style") and element.style:
-                user_style = element.style.dict(exclude_unset=True)
-                for key, value in user_style.items():
-                    if value is not None:
-                        transformed_style[key] = value
-            
-            transformed_element["style"] = transformed_style
+            # Get style properties from the template, not hardcoded
+            transformed_element["style"] = get_property_with_defaults(
+                element, 
+                template_defaults, 
+                processed_element, 
+                "style"
+            )
         
         transformed_elements.append(transformed_element)
     
