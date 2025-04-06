@@ -2,7 +2,15 @@
 
 A FastAPI-based service for creating dynamic video clips with text overlays, image overlays, and background videos.
 
-[![Deploy to DO](https://www.deploytodo.com/do-btn-blue.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/edugallegos/merclip-api/tree/main&refcode=b2da9090ff66)
+<a href="https://cloud.digitalocean.com/apps/new?repo=https://github.com/edugallegos/merclip-api/tree/main&refcode=b2da9090ff66" target="_blank">
+  <img src="https://www.deploytodo.com/do-btn-blue.svg" alt="Deploy to DO">
+</a>
+<a href="https://render.com/deploy?repo=https://github.com/edugallegos/merclip-api/tree/main" target="_blank">
+  <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render">
+</a>
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
 
 ## Features
 

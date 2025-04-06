@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: merclip-api
+    runtime: docker
+    repo: https://github.com/edugallegos/merclip-api
+    branch: main
+    plan: free
+    numInstances: 1
+    envVars:
+      - key: LOG_LEVEL
+        value: INFO
+      - key: MAX_WORKERS
+        value: "2"
+    disk:
+      name: merclip-data
+      mountPath: /var/data
+      sizeGB: 10
+    healthCheckPath: /
+    autoDeploy: false 
