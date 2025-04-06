@@ -48,7 +48,7 @@ class Style(BaseModel):
     font_family: str
     font_size: int = Field(..., gt=0)
     color: str = Field(..., pattern="^#[0-9a-fA-F]{6}$|^[a-zA-Z]+$")
-    background_color: Optional[str] = Field(None, pattern="^#[0-9a-fA-F]{6}$|^[a-zA-Z]+$|^rgba\(\d+,\d+,\d+,\d*\.?\d+\)$")
+    background_color: Optional[str] = Field(None, pattern=r"^#[0-9a-fA-F]{6}$|^[a-zA-Z]+$|^rgba\(\d+,\d+,\d+,\d*\.?\d+\)$")
     alignment: str = Field(..., pattern="^(left|center|right)$")
 
 class Element(BaseModel):
