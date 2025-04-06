@@ -21,8 +21,4 @@ spec:
     routes:
     - path: /
       preserve_path_prefix: true
-    instance_size_slug: basic-xxs
-    domains:
-    - domain: ${APP_DOMAIN}
-      type: PRIMARY
-      https_redirect: true 
+    instance_size_slug: basic-xxs 
