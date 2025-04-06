@@ -11,9 +11,5 @@ services:
         value: INFO
       - key: MAX_WORKERS
         value: "2"
-    disk:
-      name: merclip-data
-      mountPath: /var/data
-      sizeGB: 10
     healthCheckPath: /
     autoDeploy: false 
