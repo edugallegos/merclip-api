@@ -1,6 +1,7 @@
 # app/main.py
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from app.routers import clips, template, template_clip
 import os
 import logging
@@ -25,6 +26,19 @@ async def startup_event():
 # Mount the jobs directory to serve rendered videos
 jobs_dir = os.path.join(os.getcwd(), "jobs")
 app.mount("/jobs", StaticFiles(directory=jobs_dir), name="jobs")
+
+# Add root route for health checks
+@app.get("/")
+async def root():
+    return JSONResponse({
+        "status": "ok",
+        "message": "Merclip API is running",
+        "endpoints": [
+            "/clip",
+            "/template-clip",
+            "/clip/{job_id}"
+        ]
+    })
 
 app.include_router(clips.router)
 app.include_router(template.router)

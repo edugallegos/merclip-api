@@ -11,5 +11,7 @@ services:
         value: INFO
       - key: MAX_WORKERS
         value: "2"
+      - key: PORT
+        value: "8000"
     healthCheckPath: /
     autoDeploy: false 
