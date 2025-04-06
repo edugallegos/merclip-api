@@ -4,7 +4,7 @@ services:
     runtime: docker
     repo: https://github.com/edugallegos/merclip-api
     branch: main
-    plan: free
+    plan: standard
     numInstances: 1
     envVars:
       - key: LOG_LEVEL
@@ -13,5 +13,11 @@ services:
         value: "2"
       - key: PORT
         value: "8000"
+      - key: FFMPEG_THREADS
+        value: "2"
+      - key: FFMPEG_PRESET
+        value: "ultrafast"
+      - key: FFMPEG_MAX_MEMORY
+        value: "512M"
     healthCheckPath: /
     autoDeploy: false 
