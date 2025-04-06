@@ -31,11 +31,6 @@ class FFmpegService:
     STATUS_JSON = "status.json"
     INPUT_JSON = "input.json"
     
-    # Environment configuration
-    FFMPEG_THREADS = os.environ.get("FFMPEG_THREADS", "0")  # 0 means auto-detect
-    FFMPEG_PRESET = os.environ.get("FFMPEG_PRESET", "medium")  # Encoding preset (ultrafast to veryslow)
-    FFMPEG_MAX_MEMORY = os.environ.get("FFMPEG_MAX_MEMORY", "")  # Memory limit
-    
     @staticmethod
     def setup_logging(log_level=logging.INFO):
         """Set up logging configuration for the FFmpeg service.
@@ -79,7 +74,6 @@ class FFmpegService:
         ffmpeg_logger.propagate = False
         
         ffmpeg_logger.info(f"FFmpeg Service logging initialized. Log file: {log_file}")
-        ffmpeg_logger.info(f"FFmpeg configuration: threads={FFmpegService.FFMPEG_THREADS}, preset={FFmpegService.FFMPEG_PRESET}, memory_limit={FFmpegService.FFMPEG_MAX_MEMORY or 'unlimited'}")
         return log_file
 
     @staticmethod
@@ -171,14 +165,6 @@ class FFmpegService:
     def generate_command(cls, request: VideoRequest, output_path: str) -> List[str]:
         """Generate FFmpeg command for the video request."""
         cmd = ["ffmpeg", "-y"]  # Base command with overwrite flag
-        
-        # Add thread limit if specified
-        if cls.FFMPEG_THREADS and cls.FFMPEG_THREADS != "0":
-            cmd.extend(["-threads", cls.FFMPEG_THREADS])
-            
-        # Add memory limit if specified
-        if cls.FFMPEG_MAX_MEMORY:
-            cmd.extend(["-max_memory", cls.FFMPEG_MAX_MEMORY])
         
         # Add background
         cmd.extend(cls._get_background_input(request))
@@ -575,7 +561,7 @@ class FFmpegService:
         params = [
             "-t", str(request.output.duration),
             "-c:v", "libx264",
-            "-preset", cls.FFMPEG_PRESET,
+            "-preset", "medium",
             "-pix_fmt", "yuv420p"
         ]
         
