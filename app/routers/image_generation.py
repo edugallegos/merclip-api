@@ -1,9 +1,9 @@
 import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 import logging
-from app.services.image_generator import generate_multiple_images, get_output_directory
+from app.services.image_generator import generate_multiple_images
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -19,7 +19,6 @@ class ImagePrompt(BaseModel):
 
 class BatchImageGeneration(BaseModel):
     prompts: List[str]
-    output_dir: Optional[str] = None  # Now optional, will use date-based directory by default
 
 class ImageGenerationResult(BaseModel):
     prompt: str
@@ -27,17 +26,20 @@ class ImageGenerationResult(BaseModel):
     image_path: Optional[str] = None
     error: Optional[str] = None
 
-@router.post("/generate", response_model=List[ImageGenerationResult])
+class BatchGenerationResponse(BaseModel):
+    request_id: str
+    results: List[ImageGenerationResult]
+    output_directory: str
+
+@router.post("/generate", response_model=BatchGenerationResponse)
 async def generate_images(batch: BatchImageGeneration):
     """
     Generate images from a list of prompts using Gemini API.
     
     The images will be saved to a directory structure:
-    /generated_images/YYYY-MM-DD/
+    /generated_images/{request_id}/
     
     Files will be named sequentially (image_001.png, image_002.png, etc.)
-    
-    A custom output directory can be provided if desired.
     """
     try:
         logger.info(f"Generating images for {len(batch.prompts)} prompts")
@@ -55,24 +57,18 @@ async def generate_images(batch: BatchImageGeneration):
                 detail="GEMINI_API_KEY environment variable not set"
             )
         
-        # Get the output directory (for logging purposes)
-        if batch.output_dir:
-            output_dir = batch.output_dir
-        else:
-            output_dir = get_output_directory()
-        logger.info(f"Images will be saved to: {output_dir}")
-        
         # Generate the images
-        results = await generate_multiple_images(
-            prompts=batch.prompts,
-            output_dir=batch.output_dir
-        )
+        result = await generate_multiple_images(prompts=batch.prompts)
         
         # Log results
-        success_count = sum(1 for r in results if r["success"])
-        logger.info(f"Image generation complete: {success_count}/{len(results)} successful")
+        success_count = sum(1 for r in result["results"] if r["success"])
+        logger.info(f"Image generation complete: {success_count}/{len(result['results'])} successful")
         
-        return results
+        return BatchGenerationResponse(
+            request_id=result["request_id"],
+            results=result["results"],
+            output_directory=result["output_directory"]
+        )
     
     except Exception as e:
         logger.error(f"Error in image generation endpoint: {str(e)}", exc_info=True)
