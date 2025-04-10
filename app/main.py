@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import logging
 import sys
-from app.routers import example, transcription, image_generation
+from app.routers import example, transcription, image_generation, svg_generation
 
 # Configure logging
 logging.basicConfig(
@@ -17,6 +17,7 @@ logging.basicConfig(
 # Set DEBUG level for our specific modules
 logging.getLogger('app.services.image_generator').setLevel(logging.DEBUG)
 logging.getLogger('app.routers.image_generation').setLevel(logging.DEBUG)
+logging.getLogger('app.routers.svg_generation').setLevel(logging.DEBUG)
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ app = FastAPI()
 app.include_router(example.router)
 app.include_router(transcription.router)
 app.include_router(image_generation.router)
+app.include_router(svg_generation.router)
 
 @app.on_event("startup")
 async def startup_event():

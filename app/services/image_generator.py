@@ -12,6 +12,10 @@ import uuid
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Target aspect ratio constants
+TARGET_WIDTH = 1080  # Common width for 9:16 content
+TARGET_HEIGHT = 1920  # Common height for 9:16 content
+
 def load_base_image():
     """Load the base image to use as canvas"""
     base_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'base.png')
@@ -55,6 +59,35 @@ def get_next_sequence_number(directory):
             continue
     return max(sequence_numbers) + 1 if sequence_numbers else 1
 
+def resize_to_9_16(image: Image.Image) -> Image.Image:
+    """Resize image to 9:16 aspect ratio with white background
+    
+    Args:
+        image: Input PIL Image
+        
+    Returns:
+        Resized PIL Image with 9:16 aspect ratio
+    """
+    # Calculate new dimensions maintaining aspect ratio
+    width, height = image.size
+    
+    # Use full width of target canvas
+    new_width = TARGET_WIDTH
+    # Calculate height to maintain aspect ratio
+    new_height = int((new_width * height) / width)
+    
+    # Create canvas with calculated height (at least TARGET_HEIGHT)
+    canvas_height = max(new_height, TARGET_HEIGHT)
+    canvas = Image.new('RGB', (TARGET_WIDTH, canvas_height), 'white')
+    
+    # Resize image
+    resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    
+    # Paste the resized image at the top of the canvas
+    canvas.paste(resized_image, (0, 0))
+    
+    return canvas
+
 def generate_image(prompt: str, request_id: str):
     """Generate an image using Gemini API and save it to the request-specific directory
     
@@ -76,28 +109,9 @@ def generate_image(prompt: str, request_id: str):
         # Load the base image
         input_image = load_base_image()
         
-        # Convert PIL image to bytes
-        buffer = BytesIO()
-        input_image.save(buffer, format="PNG")
-        image_bytes = buffer.getvalue()
-        
-        prompt_text = f"{prompt}. Keep the same minimal line doodle style."
-        
-        # content = types.Content(
-        #     parts=[
-        #         types.Part(
-        #             inline_data=types.Blob(
-        #                 mime_type="image/png",
-        #                 data=image_bytes
-        #             )
-        #         ),
-        #         types.Part(text=prompt_text)
-        #     ]
-        # )
+        prompt_text = f"{prompt}. Keep the same minimal line doodle style portrait aspect ratio."
 
         content = [prompt_text, input_image]
-
-       
         
         response = client.models.generate_content(
             model="gemini-2.0-flash-exp-image-generation",
@@ -127,7 +141,9 @@ def generate_image(prompt: str, request_id: str):
                 print(part.text)
             elif part.inline_data is not None:
                 image = Image.open(BytesIO((part.inline_data.data)))
-                image.save(filepath)
+                # Resize image to 9:16 aspect ratio
+                resized_image = resize_to_9_16(image)
+                resized_image.save(filepath)
                 logger.info(f"Image saved successfully to {filepath}")
                 return True, filepath, None
         
