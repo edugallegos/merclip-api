@@ -1,45 +1,48 @@
 # app/main.py
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from app.routers import clips, template, template_clip
-import os
 import logging
-from app.services.ffmpeg import FFmpegService
+import sys
+from app.routers import example, transcription, image_generation
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+# Set DEBUG level for our specific modules
+logging.getLogger('app.services.image_generator').setLevel(logging.DEBUG)
+logging.getLogger('app.routers.image_generation').setLevel(logging.DEBUG)
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+# Include routers
+app.include_router(example.router)
+app.include_router(transcription.router)
+app.include_router(image_generation.router)
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on application startup."""
-    # Setup logging
-    log_file = FFmpegService.setup_logging()
-    logger.info(f"Application started. Logs will be written to: {log_file}")
-    
-    # Ensure jobs directory exists
-    jobs_dir = os.path.join(os.getcwd(), "jobs")
-    os.makedirs(jobs_dir, exist_ok=True)
-
-# Mount the jobs directory to serve rendered videos
-jobs_dir = os.path.join(os.getcwd(), "jobs")
-app.mount("/jobs", StaticFiles(directory=jobs_dir), name="jobs")
+    logger.info("Application started")
 
 # Add root route for health checks
 @app.get("/")
 async def root():
     return JSONResponse({
         "status": "ok",
-        "message": "Merclip API is running",
-        "endpoints": [
-            "/clip",
-            "/template-clip",
-            "/clip/{job_id}"
-        ]
+        "message": "API is running",
+        "version": "1.0.0"
     })
 
-app.include_router(clips.router)
-app.include_router(template.router)
-app.include_router(template_clip.router)
+# Import and include your routers here
+# Example:
+# from app.routers import example_router
+# app.include_router(example_router.router)

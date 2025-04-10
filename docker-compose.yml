@@ -1,10 +1,11 @@
 
+
 services:
-  api:
+  gemini-image:
     build: .
-    ports:
-      - "8000:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     volumes:
-      - ./jobs:/app/jobs
-      - ./logs:/app/logs
-    restart: unless-stopped
+      - .:/app
+    # For development, you can uncomment the following line to keep the container running
+    # command: tail -f /dev/null
