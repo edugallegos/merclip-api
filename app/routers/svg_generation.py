@@ -67,6 +67,16 @@ class VideoGenerationResponse(BaseModel):
     job_id: str
     output_directory: str
 
+class CombinedVideoGenerationRequest(BaseModel):
+    request_id: str
+    fps: Optional[int] = 30
+    transition_duration: Optional[float] = 0.5  # Duration of transition between sequences in seconds
+
+class CombinedVideoGenerationResponse(BaseModel):
+    request_id: str
+    job_id: str
+    output_directory: str
+
 # Initialize job status manager
 job_status_manager = JobStatusManager()
 
@@ -564,5 +574,166 @@ async def generate_videos(
         
     except Exception as e:
         error_message = f"Error in video generation endpoint: {str(e)}"
+        logger.error(error_message)
+        raise HTTPException(status_code=500, detail=error_message)
+
+def generate_combined_video(frames_dirs: List[str], output_path: str, fps: int, transition_duration: float) -> bool:
+    """Generate a single video combining all frame sequences"""
+    try:
+        logger.info(f"Starting combined video generation with {len(frames_dirs)} frame directories")
+        logger.info(f"FPS: {fps}")
+        
+        # Create a temporary directory for the concatenated frames
+        temp_dir = os.path.join(os.path.dirname(output_path), "temp_frames")
+        os.makedirs(temp_dir, exist_ok=True)
+        logger.info(f"Created temporary directory: {temp_dir}")
+        
+        # Process each sequence and copy frames to temp directory
+        all_frames = []
+        frame_count = 0
+        for i, frames_dir in enumerate(frames_dirs):
+            logger.info(f"Processing sequence {i+1} from directory: {frames_dir}")
+            
+            # Get all frames in the directory and sort them
+            frames = sorted([f for f in os.listdir(frames_dir) if f.startswith('frame_') and f.endswith('.png')])
+            logger.info(f"Found {len(frames)} frames in sequence {i+1}")
+            
+            # Copy frames to temp directory with new sequential numbering
+            for frame in frames:
+                frame_path = os.path.join(frames_dir, frame)
+                new_frame_name = f"frame_{frame_count:04d}.png"
+                new_frame_path = os.path.join(temp_dir, new_frame_name)
+                shutil.copy2(frame_path, new_frame_path)
+                all_frames.append(new_frame_path)
+                frame_count += 1
+                logger.debug(f"Copied frame: {frame_path} -> {new_frame_path}")
+        
+        logger.info(f"Total frames in final video: {len(all_frames)}")
+        
+        # Use ffmpeg to create the final video
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-framerate", str(fps),
+            "-i", os.path.join(temp_dir, "frame_%04d.png"),
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-preset", "medium",
+            "-crf", "23",
+            output_path
+        ]
+        
+        logger.info("Starting final video generation with ffmpeg")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        # Clean up temporary files
+        shutil.rmtree(temp_dir)
+        logger.info("Cleaned up temporary files")
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg error: {result.stderr}")
+            return False
+            
+        logger.info(f"Successfully generated combined video: {output_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Error generating combined video: {str(e)}")
+        return False
+
+async def process_combined_video_generation(
+    job_id: str,
+    request_id: str,
+    base_dir: str,
+    fps: int,
+    transition_duration: float
+) -> None:
+    """Process combined video generation in the background"""
+    try:
+        logger.info(f"Starting combined video generation for job {job_id}")
+        
+        # Create videos directory
+        videos_dir = os.path.join(base_dir, "videos")
+        await asyncio.to_thread(os.makedirs, videos_dir, exist_ok=True)
+        
+        # Find all frames_XXX directories
+        frame_dirs = [os.path.join(base_dir, d) for d in os.listdir(base_dir) if d.startswith("frames_")]
+        
+        if not frame_dirs:
+            logger.error("No frame directories found")
+            job_status_manager.set_job_error(job_id, "No frame directories found")
+            return
+        
+        # Generate the combined video
+        output_path = os.path.join(videos_dir, "combined_video.mp4")
+        success = await asyncio.to_thread(
+            generate_combined_video,
+            frame_dirs,
+            output_path,
+            fps,
+            transition_duration
+        )
+        
+        if success:
+            logger.info("Combined video generated successfully")
+            job_status_manager.update_job_status(job_id, "completed")
+        else:
+            logger.error("Failed to generate combined video")
+            job_status_manager.set_job_error(job_id, "Failed to generate combined video")
+            
+    except Exception as e:
+        error_msg = f"Error in combined video generation: {str(e)}"
+        logger.error(error_msg)
+        job_status_manager.set_job_error(job_id, error_msg)
+
+@router.post("/generate-combined-video", response_model=CombinedVideoGenerationResponse)
+async def generate_combined_video_endpoint(
+    request: CombinedVideoGenerationRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Generate a single video combining all frame sequences with transitions.
+    The video will be saved to:
+    /generated_images/{request_id}/videos/combined_video.mp4
+    """
+    try:
+        logger.info(f"Starting combined video generation for request_id: {request.request_id}")
+        
+        # Get the base directory for the request
+        base_dir = os.path.join(os.getcwd(), "generated_images", request.request_id)
+        if not os.path.exists(base_dir):
+            logger.error(f"Base directory not found: {base_dir}")
+            raise HTTPException(status_code=404, detail="Request ID not found")
+        
+        # Create a job ID for tracking
+        job_id = str(uuid.uuid4())
+        logger.info(f"Created job_id: {job_id}")
+        
+        # Initialize job status
+        job_status_manager.create_job(job_id, request.request_id, 1)  # Single job for the combined video
+        logger.info("Initialized job status")
+        
+        # Create response
+        response = {
+            "request_id": request.request_id,
+            "job_id": job_id,
+            "output_directory": os.path.join(base_dir, "videos")
+        }
+        
+        # Add background task
+        logger.info("Adding background task for combined video generation")
+        background_tasks.add_task(
+            process_combined_video_generation,
+            job_id=job_id,
+            request_id=request.request_id,
+            base_dir=base_dir,
+            fps=request.fps,
+            transition_duration=request.transition_duration
+        )
+        
+        logger.info("Background task added, returning response")
+        return response
+        
+    except Exception as e:
+        error_message = f"Error in combined video generation endpoint: {str(e)}"
         logger.error(error_message)
         raise HTTPException(status_code=500, detail=error_message) 
