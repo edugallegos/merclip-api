@@ -34,7 +34,7 @@ class SVGGenerationResult(BaseModel):
 
 class SVGGenerationResponse(BaseModel):
     request_id: str
-    results: List[SVGGenerationResult]
+    job_id: str
     output_directory: str
 
 class FrameConfig(BaseModel):
@@ -131,8 +131,47 @@ def generate_single_svg(prompt: str, output_dir: str, index: int) -> SVGGenerati
             error=error_message
         )
 
+async def process_svg_generation(
+    job_id: str,
+    request_id: str,
+    prompts: List[str],
+    output_dir: str
+) -> None:
+    """Process SVG generation for all prompts in the background"""
+    try:
+        logger.info(f"Starting SVG generation for job {job_id}")
+        
+        # Generate SVGs for each prompt
+        for i, prompt in enumerate(prompts):
+            logger.info(f"Processing prompt {i+1}/{len(prompts)}")
+            result = await asyncio.to_thread(
+                generate_single_svg,
+                prompt=prompt,
+                output_dir=output_dir,
+                index=i
+            )
+            
+            # Update job status with result
+            frame_result = FrameResult(
+                id=str(i),
+                success=result.success,
+                error=result.error
+            )
+            job_status_manager.update_job(job_id, frame_result)
+        
+        logger.info("All SVGs generated successfully")
+        job_status_manager.update_job_status(job_id, "completed")
+            
+    except Exception as e:
+        error_msg = f"Error in SVG generation: {str(e)}"
+        logger.error(error_msg)
+        job_status_manager.set_job_error(job_id, error_msg)
+
 @router.post("/generate", response_model=SVGGenerationResponse)
-async def generate_svgs(request: SVGGenerationRequest):
+async def generate_svgs(
+    request: SVGGenerationRequest,
+    background_tasks: BackgroundTasks
+):
     """
     Generate SVG images from a list of prompts using Replicate's recraft-ai model.
     
@@ -159,22 +198,34 @@ async def generate_svgs(request: SVGGenerationRequest):
         request_id = str(uuid.uuid4())
         output_dir = get_output_directory(request_id)
         
-        # Generate SVGs for each prompt
-        results = []
-        for i, prompt in enumerate(request.prompts):
-            result = generate_single_svg(prompt, output_dir, i)
-            results.append(result)
+        # Create a job ID for tracking
+        job_id = str(uuid.uuid4())
+        logger.info(f"Created job_id: {job_id}")
         
-        # Log results
-        success_count = sum(1 for r in results if r.success)
-        logger.info(f"SVG generation complete: {success_count}/{len(results)} successful")
+        # Initialize job status
+        job_status_manager.create_job(job_id, request_id, len(request.prompts))
+        logger.info(f"Initialized job status for {len(request.prompts)} prompts")
         
-        return SVGGenerationResponse(
+        # Create response
+        response = SVGGenerationResponse(
             request_id=request_id,
-            results=results,
+            job_id=job_id,
             output_directory=output_dir
         )
-    
+        
+        # Add background task
+        logger.info("Adding background task for SVG generation")
+        background_tasks.add_task(
+            process_svg_generation,
+            job_id=job_id,
+            request_id=request_id,
+            prompts=request.prompts,
+            output_dir=output_dir
+        )
+        
+        logger.info("Background task added, returning response")
+        return response
+        
     except Exception as e:
         error_message = f"Error in SVG generation endpoint: {str(e)}"
         logger.error(error_message)
