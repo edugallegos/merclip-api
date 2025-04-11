@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 import logging
@@ -11,6 +11,8 @@ from lxml import etree
 from PIL import Image
 import subprocess
 import io
+import asyncio
+from app.services.job_status import JobStatus, JobStatusManager, FrameResult
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -52,8 +54,21 @@ class FrameGenerationResult(BaseModel):
 
 class FrameGenerationResponse(BaseModel):
     request_id: str
+    job_id: str
     results: List[FrameGenerationResult]
     output_directory: str
+
+class VideoGenerationRequest(BaseModel):
+    request_id: str
+    fps: Optional[int] = 30
+
+class VideoGenerationResponse(BaseModel):
+    request_id: str
+    job_id: str
+    output_directory: str
+
+# Initialize job status manager
+job_status_manager = JobStatusManager()
 
 def get_output_directory(request_id: str):
     """Create and return an output directory structure using request ID"""
@@ -285,15 +300,17 @@ def generate_frames_for_svg(svg_path: str, output_dir: str, duration: float, con
         return False
 
 @router.post("/generate-frames", response_model=FrameGenerationResponse)
-async def generate_svg_frames(request: FrameGenerationRequest):
+async def generate_svg_frames(
+    request: FrameGenerationRequest,
+    background_tasks: BackgroundTasks
+):
     """
     Generate frames from existing SVGs using the provided request_id and durations.
-    
     The frames will be saved to a directory structure:
     /generated_images/{request_id}/frames_{id}/frame_0000.png, frame_0001.png, etc.
     """
     try:
-        logger.info(f"Generating frames for request_id: {request.request_id}")
+        logger.info(f"Starting frame generation for request_id: {request.request_id}")
         
         # Validate input
         if not request.frames:
@@ -303,46 +320,249 @@ async def generate_svg_frames(request: FrameGenerationRequest):
         # Get the base directory for the request
         base_dir = os.path.join(os.getcwd(), "generated_images", request.request_id)
         if not os.path.exists(base_dir):
+            logger.error(f"Base directory not found: {base_dir}")
             raise HTTPException(status_code=404, detail="Request ID not found")
         
-        results = []
-        for frame_config in request.frames:
-            # Find the corresponding SVG file
-            svg_path = os.path.join(base_dir, f"output_{frame_config.id}.svg")
-            if not os.path.exists(svg_path):
-                results.append(FrameGenerationResult(
-                    id=frame_config.id,
-                    success=False,
-                    error=f"SVG file not found for id {frame_config.id}"
-                ))
-                continue
-            
-            # Create frames directory
-            frames_dir = os.path.join(base_dir, f"frames_{frame_config.id}")
-            os.makedirs(frames_dir, exist_ok=True)
-            
-            # Generate frames
-            success = generate_frames_for_svg(
-                svg_path=svg_path,
-                output_dir=frames_dir,
-                duration=frame_config.duration,
-                config=request.config
-            )
-            
-            results.append(FrameGenerationResult(
-                id=frame_config.id,
-                success=success,
-                frames_path=frames_dir if success else None,
-                error=None if success else "Failed to generate frames"
-            ))
+        # Create a job ID for tracking
+        job_id = str(uuid.uuid4())
+        logger.info(f"Created job_id: {job_id}")
         
-        return FrameGenerationResponse(
-            request_id=request.request_id,
-            results=results,
-            output_directory=base_dir
-        )
+        # Initialize job status
+        job_status_manager.create_job(job_id, request.request_id, len(request.frames))
+        logger.info(f"Initialized job status for {len(request.frames)} frames")
+        
+        # Create response first
+        response = {
+            "request_id": request.request_id,
+            "job_id": job_id,
+            "results": [],
+            "output_directory": base_dir
+        }
+        
+        # Add background tasks for each frame
+        for frame_config in request.frames:
+            logger.info(f"Adding background task for frame {frame_config.id}")
+            background_tasks.add_task(
+                process_frame_generation,
+                job_id=job_id,
+                request_id=request.request_id,
+                frame_config=frame_config,
+                config=request.config,
+                base_dir=base_dir
+            )
+        
+        logger.info("All background tasks added, returning response")
+        # Return immediately with job_id
+        return response
     
     except Exception as e:
         error_message = f"Error in frame generation endpoint: {str(e)}"
+        logger.error(error_message)
+        raise HTTPException(status_code=500, detail=error_message)
+
+async def process_frame_generation(
+    job_id: str,
+    request_id: str,
+    frame_config: FrameConfig,
+    config: Optional[Dict],
+    base_dir: str
+) -> None:
+    """Process frame generation for a single SVG in the background"""
+    try:
+        logger.info(f"Starting frame generation for job {job_id}, frame {frame_config.id}")
+        
+        # Find the corresponding SVG file
+        svg_path = os.path.join(base_dir, f"output_{frame_config.id}.svg")
+        logger.info(f"Looking for SVG file at: {svg_path}")
+        
+        if not os.path.exists(svg_path):
+            logger.error(f"SVG file not found: {svg_path}")
+            result = FrameResult(
+                id=frame_config.id,
+                success=False,
+                error=f"SVG file not found for id {frame_config.id}"
+            )
+            job_status_manager.update_job(job_id, result)
+            return
+        
+        # Create frames directory (remove if exists)
+        frames_dir = os.path.join(base_dir, f"frames_{frame_config.id}")
+        logger.info(f"Processing frames directory: {frames_dir}")
+        
+        if os.path.exists(frames_dir):
+            logger.info(f"Removing existing frames directory: {frames_dir}")
+            await asyncio.to_thread(shutil.rmtree, frames_dir)
+        
+        logger.info(f"Creating new frames directory: {frames_dir}")
+        await asyncio.to_thread(os.makedirs, frames_dir, exist_ok=True)
+        
+        # Generate frames
+        logger.info(f"Starting frame generation for SVG: {svg_path}")
+        success = await asyncio.to_thread(
+            generate_frames_for_svg,
+            svg_path=svg_path,
+            output_dir=frames_dir,
+            duration=frame_config.duration,
+            config=config
+        )
+        
+        logger.info(f"Frame generation completed with success={success}")
+        result = FrameResult(
+            id=frame_config.id,
+            success=success,
+            frames_path=frames_dir if success else None,
+            error=None if success else "Failed to generate frames"
+        )
+        
+        job_status_manager.update_job(job_id, result)
+        logger.info(f"Updated job status for frame {frame_config.id}")
+        
+    except Exception as e:
+        logger.error(f"Error processing frame generation: {str(e)}")
+        result = FrameResult(
+            id=frame_config.id,
+            success=False,
+            error=str(e)
+        )
+        job_status_manager.update_job(job_id, result)
+        logger.error(f"Updated job status with error for frame {frame_config.id}")
+
+@router.get("/job-status/{job_id}", response_model=JobStatus)
+async def get_job_status(job_id: str):
+    """Get the status of a background job"""
+    job_status = job_status_manager.get_job(job_id)
+    if not job_status:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job_status
+
+def generate_video_from_frames(frames_dir: str, output_path: str, fps: int) -> bool:
+    """Generate a video from a sequence of frames using ffmpeg"""
+    try:
+        # Construct ffmpeg command
+        cmd = [
+            "ffmpeg",
+            "-y",  # Overwrite output file if exists
+            "-framerate", str(fps),
+            "-i", os.path.join(frames_dir, "frame_%04d.png"),
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",  # Required for compatibility
+            "-preset", "medium",  # Balance between speed and compression
+            "-crf", "23",  # Quality setting (0-51, lower is better)
+            output_path
+        ]
+        
+        # Run ffmpeg
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg error: {result.stderr}")
+            return False
+            
+        return True
+    except Exception as e:
+        logger.error(f"Error generating video: {str(e)}")
+        return False
+
+async def process_video_generation(
+    job_id: str,
+    request_id: str,
+    base_dir: str,
+    fps: int
+) -> None:
+    """Process video generation for all frame sequences in the background"""
+    try:
+        logger.info(f"Starting video generation for job {job_id}")
+        
+        # Create videos directory
+        videos_dir = os.path.join(base_dir, "videos")
+        await asyncio.to_thread(os.makedirs, videos_dir, exist_ok=True)
+        
+        # Find all frames_XXX directories
+        frame_dirs = [d for d in os.listdir(base_dir) if d.startswith("frames_")]
+        
+        if not frame_dirs:
+            logger.error("No frame directories found")
+            job_status_manager.set_job_error(job_id, "No frame directories found")
+            return
+        
+        total_success = True
+        for frame_dir in frame_dirs:
+            frames_path = os.path.join(base_dir, frame_dir)
+            sequence_id = frame_dir.replace("frames_", "")
+            output_path = os.path.join(videos_dir, f"video_{sequence_id}.mp4")
+            
+            logger.info(f"Generating video for sequence {sequence_id}")
+            success = await asyncio.to_thread(
+                generate_video_from_frames,
+                frames_path,
+                output_path,
+                fps
+            )
+            
+            if not success:
+                total_success = False
+                logger.error(f"Failed to generate video for sequence {sequence_id}")
+        
+        if total_success:
+            logger.info("All videos generated successfully")
+            job_status_manager.update_job_status(job_id, "completed")
+        else:
+            logger.error("Some videos failed to generate")
+            job_status_manager.set_job_error(job_id, "Some videos failed to generate")
+            
+    except Exception as e:
+        error_msg = f"Error in video generation: {str(e)}"
+        logger.error(error_msg)
+        job_status_manager.set_job_error(job_id, error_msg)
+
+@router.post("/generate-videos", response_model=VideoGenerationResponse)
+async def generate_videos(
+    request: VideoGenerationRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Generate videos from frame sequences in frames_XXX folders.
+    The videos will be saved to:
+    /generated_images/{request_id}/videos/video_XXX.mp4
+    """
+    try:
+        logger.info(f"Starting video generation for request_id: {request.request_id}")
+        
+        # Get the base directory for the request
+        base_dir = os.path.join(os.getcwd(), "generated_images", request.request_id)
+        if not os.path.exists(base_dir):
+            logger.error(f"Base directory not found: {base_dir}")
+            raise HTTPException(status_code=404, detail="Request ID not found")
+        
+        # Create a job ID for tracking
+        job_id = str(uuid.uuid4())
+        logger.info(f"Created job_id: {job_id}")
+        
+        # Initialize job status
+        job_status_manager.create_job(job_id, request.request_id, 1)  # Single job for all videos
+        logger.info("Initialized job status")
+        
+        # Create response
+        response = {
+            "request_id": request.request_id,
+            "job_id": job_id,
+            "output_directory": os.path.join(base_dir, "videos")
+        }
+        
+        # Add background task
+        logger.info("Adding background task for video generation")
+        background_tasks.add_task(
+            process_video_generation,
+            job_id=job_id,
+            request_id=request.request_id,
+            base_dir=base_dir,
+            fps=request.fps
+        )
+        
+        logger.info("Background task added, returning response")
+        return response
+        
+    except Exception as e:
+        error_message = f"Error in video generation endpoint: {str(e)}"
         logger.error(error_message)
         raise HTTPException(status_code=500, detail=error_message) 

@@ -1,3 +1,4 @@
+version: '3.8'
 
 services:
   api:
@@ -6,6 +7,8 @@ services:
       - "8000:8000"
     volumes:
       - ./generated_images:/app/generated_images
+      - ./app:/app/app
+      - ./requirements.txt:/app/requirements.txt
     environment:
       - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
