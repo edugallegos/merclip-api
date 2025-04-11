@@ -321,7 +321,8 @@ def generate_frames_for_svg(svg_path: str, output_dir: str, duration: float, con
             "fps": 30,
             "width": 1080,
             "height": 1920,
-            "animation": "color"
+            "animation": "color",
+            "hold_duration": 1.5  # Duration to hold the complete image at the end
         }
         
         # Merge with provided config
@@ -333,27 +334,54 @@ def generate_frames_for_svg(svg_path: str, output_dir: str, duration: float, con
         width = merged_config["width"]
         height = merged_config["height"]
         animation = merged_config["animation"]
+        hold_duration = merged_config["hold_duration"]
         
-        total_frames = round(duration * fps)
+        # Calculate frames for animation and hold
+        animation_frames = round((duration - hold_duration) * fps)
+        hold_frames = round(hold_duration * fps)
+        total_frames = animation_frames + hold_frames
         
-        for frame in range(total_frames):
+        logger.info(f"Generating {total_frames} frames: {animation_frames} animation frames + {hold_frames} hold frames")
+        
+        # Generate animation frames
+        for frame in range(animation_frames):
             svg_tree = load_svg(svg_path)
             
             if animation in ['color', 'both']:
-                apply_global_color_morph(svg_tree, from_color, to_color, frame, total_frames)
+                apply_global_color_morph(svg_tree, from_color, to_color, frame, animation_frames)
             
             if animation in ['reveal', 'both']:
-                apply_sequential_reveal(svg_tree, frame, total_frames)
+                apply_sequential_reveal(svg_tree, frame, animation_frames)
             
             tmp_svg = os.path.join(output_dir, 'tmp.svg')
             save_svg(svg_tree, tmp_svg)
             output_path = os.path.join(output_dir, f'frame_{frame:04d}.png')
             svg_to_png(tmp_svg, output_path, width, height)
         
+        # Generate hold frames (complete image without changes)
+        logger.info(f"Generating {hold_frames} hold frames")
+        for frame in range(hold_frames):
+            # Use the last animation frame as the base for hold frames
+            svg_tree = load_svg(svg_path)
+            
+            if animation in ['color', 'both']:
+                # Use the final color for all hold frames
+                apply_global_color_morph(svg_tree, from_color, to_color, animation_frames - 1, animation_frames)
+            
+            if animation in ['reveal', 'both']:
+                # Show all elements for hold frames
+                apply_sequential_reveal(svg_tree, animation_frames - 1, animation_frames)
+            
+            tmp_svg = os.path.join(output_dir, 'tmp.svg')
+            save_svg(svg_tree, tmp_svg)
+            output_path = os.path.join(output_dir, f'frame_{frame + animation_frames:04d}.png')
+            svg_to_png(tmp_svg, output_path, width, height)
+        
         # Clean up temporary file
         if os.path.exists(tmp_svg):
             os.remove(tmp_svg)
         
+        logger.info(f"Successfully generated {total_frames} frames")
         return True
     
     except Exception as e:
@@ -639,10 +667,18 @@ def generate_combined_video(frames_dirs: List[str], output_path: str, fps: int, 
         os.makedirs(temp_dir, exist_ok=True)
         logger.info(f"Created temporary directory: {temp_dir}")
         
+        # Sort frame directories numerically
+        def get_frame_number(dir_path):
+            dir_name = os.path.basename(dir_path)
+            return int(dir_name.replace("frames_", ""))
+        
+        sorted_frames_dirs = sorted(frames_dirs, key=get_frame_number)
+        logger.info(f"Sorted frame directories: {[os.path.basename(d) for d in sorted_frames_dirs]}")
+        
         # Process each sequence and copy frames to temp directory
         all_frames = []
         frame_count = 0
-        for i, frames_dir in enumerate(frames_dirs):
+        for i, frames_dir in enumerate(sorted_frames_dirs):
             logger.info(f"Processing sequence {i+1} from directory: {frames_dir}")
             
             # Get all frames in the directory and sort them
