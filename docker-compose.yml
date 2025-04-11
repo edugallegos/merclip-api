@@ -1,11 +1,14 @@
 
-
 services:
-  gemini-image:
+  api:
     build: .
-    environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    ports:
+      - "8000:8000"
     volumes:
-      - .:/app
-    # For development, you can uncomment the following line to keep the container running
-    # command: tail -f /dev/null
+      - ./generated_images:/app/generated_images
+    environment:
+      - ASSEMBLYAI_API_KEY=${ASSEMBLYAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
+      - ENVIRONMENT=development
+    restart: unless-stopped
