@@ -13,6 +13,7 @@ import subprocess
 import io
 import asyncio
 from app.services.job_status import JobStatus, JobStatusManager, FrameResult
+from fastapi.responses import FileResponse
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -336,27 +337,54 @@ def generate_frames_for_svg(svg_path: str, output_dir: str, duration: float, con
         animation = merged_config["animation"]
         hold_duration = merged_config["hold_duration"]
         
-        # Calculate frames for animation and hold
-        animation_frames = round((duration - hold_duration) * fps)
+        # Calculate total frames
+        total_frames = round(duration * fps)
         hold_frames = round(hold_duration * fps)
-        total_frames = animation_frames + hold_frames
+        animation_frames = total_frames - hold_frames
+
+        # Ensure animation_frames is not negative
+        if animation_frames < 0:
+            animation_frames = 0
+            hold_frames = total_frames
         
         logger.info(f"Generating {total_frames} frames: {animation_frames} animation frames + {hold_frames} hold frames")
         
-        # Generate animation frames
-        for frame in range(animation_frames):
-            svg_tree = load_svg(svg_path)
-            
-            if animation in ['color', 'both']:
-                apply_global_color_morph(svg_tree, from_color, to_color, frame, animation_frames)
-            
-            if animation in ['reveal', 'both']:
-                apply_sequential_reveal(svg_tree, frame, animation_frames)
-            
-            tmp_svg = os.path.join(output_dir, 'tmp.svg')
-            save_svg(svg_tree, tmp_svg)
-            output_path = os.path.join(output_dir, f'frame_{frame:04d}.png')
-            svg_to_png(tmp_svg, output_path, width, height)
+        # Load the original SVG and get all elements
+        original_svg = load_svg(svg_path)
+        elements = [elem for elem in original_svg.iter() if elem.tag.endswith('path') and elem.get("fill") != "rgb(254,254,254)"]
+        total_elements = len(elements)
+        logger.info(f"Found {total_elements} elements in SVG")
+        
+        # Generate animation frames only if animation_frames > 0
+        if animation_frames > 0:
+            # Calculate elements per frame
+            elements_per_frame = total_elements / animation_frames
+            logger.info(f"Elements per frame: {elements_per_frame}")
+
+            for frame in range(animation_frames):
+                svg_tree = load_svg(svg_path)
+                visible_elements = int(frame * elements_per_frame)
+                
+                # Process each element
+                for i, elem in enumerate(svg_tree.iter()):
+                    if elem.tag.endswith('path') and elem.get("fill") != "rgb(254,254,254)":
+                        # Set visibility based on frame
+                        if i < visible_elements:
+                            elem.set("opacity", "1")
+                            if animation in ['color', 'both']:
+                                # Calculate color progress
+                                color_progress = min(1.0, i / total_elements)
+                                new_color = interpolate_color(from_color, to_color, color_progress)
+                                elem.set("fill", new_color)
+                        else:
+                            elem.set("opacity", "0")
+                
+                tmp_svg = os.path.join(output_dir, 'tmp.svg')
+                save_svg(svg_tree, tmp_svg)
+                output_path = os.path.join(output_dir, f'frame_{frame:04d}.png')
+                svg_to_png(tmp_svg, output_path, width, height)
+        else:
+            logger.info("Skipping animation frames generation as animation_frames is 0 or less.")
         
         # Generate hold frames (complete image without changes)
         logger.info(f"Generating {hold_frames} hold frames")
@@ -364,17 +392,18 @@ def generate_frames_for_svg(svg_path: str, output_dir: str, duration: float, con
             # Use the last animation frame as the base for hold frames
             svg_tree = load_svg(svg_path)
             
-            if animation in ['color', 'both']:
-                # Use the final color for all hold frames
-                apply_global_color_morph(svg_tree, from_color, to_color, animation_frames - 1, animation_frames)
-            
-            if animation in ['reveal', 'both']:
-                # Show all elements for hold frames
-                apply_sequential_reveal(svg_tree, animation_frames - 1, animation_frames)
+            # Make all elements visible with final color
+            for elem in svg_tree.iter():
+                if elem.tag.endswith('path') and elem.get("fill") != "rgb(254,254,254)":
+                    elem.set("opacity", "1")
+                    if animation in ['color', 'both']:
+                        elem.set("fill", to_color)
             
             tmp_svg = os.path.join(output_dir, 'tmp.svg')
             save_svg(svg_tree, tmp_svg)
-            output_path = os.path.join(output_dir, f'frame_{frame + animation_frames:04d}.png')
+            # Adjust frame numbering if there were no animation frames
+            frame_index = frame if animation_frames <= 0 else frame + animation_frames
+            output_path = os.path.join(output_dir, f'frame_{frame_index:04d}.png')
             svg_to_png(tmp_svg, output_path, width, height)
         
         # Clean up temporary file
@@ -822,5 +851,32 @@ async def generate_combined_video_endpoint(
         
     except Exception as e:
         error_message = f"Error in combined video generation endpoint: {str(e)}"
+        logger.error(error_message)
+        raise HTTPException(status_code=500, detail=error_message)
+
+@router.get("/download-video/{request_id}")
+async def download_combined_video(request_id: str):
+    """
+    Download the combined video file for a specific request_id.
+    """
+    try:
+        # Construct the path to the combined video file
+        base_dir = os.path.join(os.getcwd(), "generated_images", request_id)
+        video_path = os.path.join(base_dir, "videos", "combined_video.mp4")
+        
+        # Check if the video file exists
+        if not os.path.exists(video_path):
+            logger.error(f"Combined video not found at path: {video_path}")
+            raise HTTPException(status_code=404, detail="Combined video not found for the specified request_id")
+        
+        # Return the file as a downloadable response
+        return FileResponse(
+            path=video_path,
+            filename=f"combined_video_{request_id}.mp4",
+            media_type="video/mp4"
+        )
+            
+    except Exception as e:
+        error_message = f"Error downloading combined video: {str(e)}"
         logger.error(error_message)
         raise HTTPException(status_code=500, detail=error_message) 
