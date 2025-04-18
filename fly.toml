@@ -3,31 +3,29 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'merclip-api-tools'
-primary_region = 'bog'
-kill_signal = 'SIGINT'
-kill_timeout = '5s'
+app = "merclip-api-tools"
+primary_region = "iad"
+kill_signal = "SIGINT"
+kill_timeout = 5
 
 [build]
-  dockerfile = 'Dockerfile'
+  dockerfile = "Dockerfile"
 
 [env]
-  PORT = '8000'
-
-[[mounts]]
-  source = 'merclip_data'
-  destination = '/app/generated_images'
+  PORT = "8000"
+  # API_KEY will be set using fly secrets set
+  # Other environment variables should be set using secrets too
 
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = 'stop'
+  auto_stop_machines = true
   auto_start_machines = true
   min_machines_running = 0
-  processes = ['app']
-
+  processes = ["app"]
+  
   [http_service.concurrency]
-    type = 'connections'
+    type = "connections"
     hard_limit = 1000
     soft_limit = 500
 
@@ -37,5 +35,9 @@ kill_timeout = '5s'
   cpus = 1
 
 [[statics]]
-  guest_path = '/app/generated_images'
-  url_prefix = '/generated_images'
+  guest_path = "/app/generated_images"
+  url_prefix = "/generated_images"
+
+[mounts]
+  source = "merclip_data"
+  destination = "/app/generated_images"
