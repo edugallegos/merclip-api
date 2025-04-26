@@ -41,6 +41,8 @@ class VideoResponse(BaseModel):
     srt_url: Optional[str] = None
     collage_path: Optional[str] = None
     collage_url: Optional[str] = None
+    srt_content: Optional[str] = None     # Raw SRT content as string
+    transcript_text: Optional[str] = None  # Plain text transcript
     platform: Optional[str] = None
     video_id: Optional[str] = None
     errors: List[str] = []
@@ -60,6 +62,7 @@ async def download_video(request: VideoRequest, request_info: Request):
     """
     Download a video from a Twitter/X or TikTok post URL.
     Extracts audio, generates transcription, and creates a collage if enabled.
+    Returns SRT content as string when available.
     """
     try:
         # Determine platform from URL for response
@@ -70,8 +73,14 @@ async def download_video(request: VideoRequest, request_info: Request):
         elif "tiktok.com" in url:
             platform = "tiktok"
         
-        # Download the video through the pipeline
-        file_path, audio_path, srt_path, collage_path = video_processor.download_video(url, request.language_code)
+        # Download the video through the extended pipeline
+        result = video_processor.download_video_extended(url, request.language_code)
+        file_path = result["video_path"]
+        audio_path = result["audio_path"]
+        srt_path = result["srt_path"]
+        collage_path = result["collage_path"]
+        srt_content = result["srt_content"]
+        transcript_text = result["transcript_text"]
         
         logger.info(f"Router received: file_path={file_path}, audio_path={audio_path}, srt_path={srt_path}, collage_path={collage_path}")
         
@@ -142,6 +151,8 @@ async def download_video(request: VideoRequest, request_info: Request):
                 srt_url=srt_url,
                 collage_path=collage_path,
                 collage_url=collage_url,
+                srt_content=srt_content,
+                transcript_text=transcript_text,
                 platform=platform,
                 video_id=video_id
             )

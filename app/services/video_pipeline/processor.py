@@ -1,6 +1,7 @@
 import os
 import logging
-from typing import Optional, Tuple, List, Type, Callable
+import base64
+from typing import Optional, Tuple, List, Type, Callable, Dict, Any
 from app.services.video_pipeline.context import VideoContext
 from app.services.video_pipeline.steps.base_step import BaseStep
 from app.services.video_pipeline.steps import (
@@ -135,4 +136,79 @@ class VideoProcessor:
         
         logger.info(f"Pipeline completed. Results: video_path={context.video_path}, audio_path={context.audio_path}, srt_path={context.srt_path}, collage_path={context.collage_path}")
         
-        return context.video_path, context.audio_path, context.srt_path, context.collage_path 
+        return context.video_path, context.audio_path, context.srt_path, context.collage_path
+    
+    def download_video_extended(self, url: str, language_code: str = "es") -> Dict[str, Any]:
+        """Download and process a video from a URL with extended results.
+        
+        Args:
+            url: The URL of the video to download
+            language_code: The language code for transcription (default: es)
+            
+        Returns:
+            A dictionary containing file paths and raw SRT content
+        """
+        # Initialize the context
+        context = VideoContext(url=url)
+        context.metadata["language_code"] = language_code
+        
+        # Run the pipeline
+        for step in self.steps:
+            # Keep track of errors before this step
+            previous_errors = context.errors.copy()
+            
+            # Run the step
+            context = step(context)
+            
+            # Only break on critical early steps (platform identification, download, or audio extraction)
+            if context.has_errors() and step.name in ["identify_platform", "download_video", "extract_audio"]:
+                logger.warning(f"Pipeline stopped due to critical error in {step.name}: {context.errors}")
+                break
+                
+            # For non-critical steps (transcription, collage), log errors but continue
+            if context.has_errors() and len(context.errors) > len(previous_errors):
+                new_errors = context.errors[len(previous_errors):]
+                logger.warning(f"Non-critical errors in {step.name}, continuing pipeline: {new_errors}")
+        
+        # Initialize result dictionary
+        result = {
+            "video_path": context.video_path,
+            "audio_path": context.audio_path,
+            "srt_path": context.srt_path,
+            "collage_path": context.collage_path,
+            "transcript_text": context.transcript_text,
+            "srt_content": None
+        }
+        
+        # Get SRT content if available
+        if context.srt_path and os.path.exists(context.srt_path):
+            try:
+                with open(context.srt_path, "r", encoding="utf-8") as srt_file:
+                    result["srt_content"] = srt_file.read()
+                    logger.info(f"Successfully read SRT content")
+            except Exception as e:
+                logger.error(f"Error reading SRT content: {str(e)}")
+        
+        logger.info(f"Extended pipeline completed. Results include raw data and file paths: {', '.join(key for key, val in result.items() if val)}")
+        
+        return result
+    
+    def get_srt_content(self, srt_path: str) -> Optional[str]:
+        """Get the raw content of an SRT file as a string.
+        
+        Args:
+            srt_path: Path to the SRT file
+            
+        Returns:
+            String content of the SRT file, or None if the file doesn't exist or there's an error
+        """
+        if not srt_path or not os.path.exists(srt_path):
+            logger.error(f"SRT path is missing or does not exist: {srt_path}")
+            return None
+            
+        try:
+            with open(srt_path, "r", encoding="utf-8") as srt_file:
+                return srt_file.read()
+        except Exception as e:
+            logger.error(f"Error reading SRT content: {str(e)}")
+            return None 
