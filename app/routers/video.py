@@ -4,7 +4,7 @@ from pydantic import BaseModel, HttpUrl
 import os
 import logging
 from typing import Optional, List
-from app.services.twitter_downloader import VideoDownloader
+from app.services.video_pipeline import VideoProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -14,12 +14,12 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# Initialize the VideoDownloader service
-video_downloader = VideoDownloader()
+# Initialize the VideoProcessor
+video_processor = VideoProcessor()
 
 # Configure pipeline steps as needed
-# Example: Disable audio extraction
-# video_downloader.enable_step("extract_audio", False)
+# Example: Disable transcription
+# video_processor.enable_step("transcribe_audio", False)
 
 class VideoRequest(BaseModel):
     url: HttpUrl
@@ -53,7 +53,7 @@ async def download_video(request: VideoRequest, request_info: Request):
             platform = "tiktok"
         
         # Download the video through the pipeline
-        file_path, audio_path, srt_path = video_downloader.download_video(url, request.language_code)
+        file_path, audio_path, srt_path = video_processor.download_video(url, request.language_code)
         
         if file_path and os.path.exists(file_path):
             # Extract video_id and filename from the file_path
@@ -105,7 +105,7 @@ async def get_twitter_video(video_id: str):
     """
     try:
         # Look for files with the video ID prefix in the Twitter output directory
-        video_dir = video_downloader.twitter_dir
+        video_dir = video_processor.twitter_dir
         matching_files = [f for f in os.listdir(video_dir) if f.startswith(video_id)]
         
         if matching_files:
@@ -134,7 +134,7 @@ async def get_tiktok_video(video_id: str):
     """
     try:
         # Look for files with the video ID prefix in the TikTok output directory
-        video_dir = video_downloader.tiktok_dir
+        video_dir = video_processor.tiktok_dir
         matching_files = [f for f in os.listdir(video_dir) if f.startswith(video_id)]
         
         if matching_files:
@@ -163,9 +163,9 @@ async def serve_video(platform: str, video_id: str, filename: str):
     """
     try:
         if platform == "twitter":
-            video_dir = video_downloader.twitter_dir
+            video_dir = video_processor.twitter_dir
         elif platform == "tiktok":
-            video_dir = video_downloader.tiktok_dir
+            video_dir = video_processor.tiktok_dir
         else:
             raise HTTPException(
                 status_code=400,
@@ -197,7 +197,7 @@ async def serve_audio(video_id: str, filename: str):
     This endpoint provides direct access to the extracted audio file.
     """
     try:
-        audio_dir = video_downloader.audio_dir
+        audio_dir = video_processor.audio_dir
         audio_path = os.path.join(audio_dir, filename)
         
         if os.path.exists(audio_path) and filename.startswith(video_id):
@@ -223,7 +223,7 @@ async def serve_transcript(video_id: str, filename: str):
     This endpoint provides direct access to the transcript file.
     """
     try:
-        transcript_dir = video_downloader.transcripts_dir
+        transcript_dir = video_processor.transcripts_dir
         transcript_path = os.path.join(transcript_dir, filename)
         
         if os.path.exists(transcript_path) and filename.startswith(video_id):
@@ -250,7 +250,7 @@ async def get_audio(video_id: str):
     """
     try:
         # Look for files with the video ID prefix in the audio output directory
-        audio_dir = video_downloader.audio_dir
+        audio_dir = video_processor.audio_dir
         matching_files = [f for f in os.listdir(audio_dir) if f.startswith(video_id)]
         
         if matching_files:
@@ -279,7 +279,7 @@ async def get_transcript(video_id: str):
     """
     try:
         # Look for files with the video ID prefix in the transcripts output directory
-        transcript_dir = video_downloader.transcripts_dir
+        transcript_dir = video_processor.transcripts_dir
         matching_files = [f for f in os.listdir(transcript_dir) if f.startswith(video_id)]
         
         if matching_files:
