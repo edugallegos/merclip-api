@@ -16,6 +16,7 @@ class VideoContext:
     transcript_text: Optional[str] = None
     transcript_srt: Optional[str] = None
     srt_path: Optional[str] = None
+    collage_path: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
     

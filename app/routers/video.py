@@ -34,6 +34,8 @@ class VideoResponse(BaseModel):
     audio_url: Optional[str] = None
     srt_path: Optional[str] = None
     srt_url: Optional[str] = None
+    collage_path: Optional[str] = None
+    collage_url: Optional[str] = None
     platform: Optional[str] = None
     errors: List[str] = []
     
@@ -41,7 +43,7 @@ class VideoResponse(BaseModel):
 async def download_video(request: VideoRequest, request_info: Request):
     """
     Download a video from a Twitter/X or TikTok post URL.
-    Extracts audio and generates transcription if enabled.
+    Extracts audio, generates transcription, and creates a collage if enabled.
     """
     try:
         # Determine platform from URL for response
@@ -53,7 +55,16 @@ async def download_video(request: VideoRequest, request_info: Request):
             platform = "tiktok"
         
         # Download the video through the pipeline
-        file_path, audio_path, srt_path = video_processor.download_video(url, request.language_code)
+        file_path, audio_path, srt_path, collage_path = video_processor.download_video(url, request.language_code)
+        
+        logger.info(f"Router received: file_path={file_path}, audio_path={audio_path}, srt_path={srt_path}, collage_path={collage_path}")
+        
+        # Explicit collage check
+        if collage_path:
+            if os.path.exists(collage_path):
+                logger.info(f"Router verified: Collage file exists at {collage_path}")
+            else:
+                logger.warning(f"Router warning: Collage path was provided but file does not exist at {collage_path}")
         
         if file_path and os.path.exists(file_path):
             # Extract video_id and filename from the file_path
@@ -76,6 +87,12 @@ async def download_video(request: VideoRequest, request_info: Request):
                 srt_filename = os.path.basename(srt_path)
                 srt_url = f"{base_url}video/serve-transcript/{video_id}/{srt_filename}"
             
+            # Generate collage URL if collage was created
+            collage_url = None
+            if collage_path and os.path.exists(collage_path):
+                collage_filename = os.path.basename(collage_path)
+                collage_url = f"{base_url}video/serve-collage/{video_id}/{collage_filename}"
+            
             return VideoResponse(
                 status="success",
                 message=f"{platform.capitalize()} video processed successfully",
@@ -85,6 +102,8 @@ async def download_video(request: VideoRequest, request_info: Request):
                 audio_url=audio_url,
                 srt_path=srt_path,
                 srt_url=srt_url,
+                collage_path=collage_path,
+                collage_url=collage_url,
                 platform=platform
             )
         else:
@@ -242,6 +261,32 @@ async def serve_transcript(video_id: str, filename: str):
         logger.error(f"Error serving transcript file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to serve transcript: {str(e)}")
 
+@router.get("/serve-collage/{video_id}/{filename}")
+async def serve_collage(video_id: str, filename: str):
+    """
+    Serve a specific collage image file by video ID and filename.
+    This endpoint provides direct access to the collage image.
+    """
+    try:
+        collage_dir = video_processor.collages_dir
+        collage_path = os.path.join(collage_dir, filename)
+        
+        if os.path.exists(collage_path) and filename.startswith(video_id):
+            return FileResponse(
+                path=collage_path,
+                media_type="image/jpeg",
+                filename=filename
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Collage file not found: {filename}"
+            )
+    
+    except Exception as e:
+        logger.error(f"Error serving collage file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to serve collage: {str(e)}")
+
 @router.get("/audio/{video_id}")
 async def get_audio(video_id: str):
     """
@@ -298,4 +343,33 @@ async def get_transcript(video_id: str):
     
     except Exception as e:
         logger.error(f"Error retrieving transcript: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve transcript: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve transcript: {str(e)}")
+
+@router.get("/collage/{video_id}")
+async def get_collage(video_id: str):
+    """
+    Retrieve a previously generated collage by video ID.
+    This endpoint will search for a matching collage image and serve it.
+    """
+    try:
+        # Look for files with the video ID prefix in the collages output directory
+        collage_dir = video_processor.collages_dir
+        matching_files = [f for f in os.listdir(collage_dir) if f.startswith(video_id)]
+        
+        if matching_files:
+            # Use the most recently created file if multiple exist
+            collage_path = os.path.join(collage_dir, matching_files[0])
+            return FileResponse(
+                path=collage_path,
+                media_type="image/jpeg",
+                filename=os.path.basename(collage_path)
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No collage found for video ID: {video_id}"
+            )
+    
+    except Exception as e:
+        logger.error(f"Error retrieving collage: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve collage: {str(e)}") 

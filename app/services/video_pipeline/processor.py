@@ -7,7 +7,8 @@ from app.services.video_pipeline.steps import (
     IdentifyPlatformStep,
     DownloadVideoStep,
     ExtractAudioStep,
-    TranscribeAudioStep
+    TranscribeAudioStep,
+    CreateCollageStep
 )
 
 logger = logging.getLogger(__name__)
@@ -30,12 +31,14 @@ class VideoProcessor:
         self.tiktok_dir = os.path.join(output_dir, "tiktok")
         self.audio_dir = os.path.join(output_dir, "audio")
         self.transcripts_dir = os.path.join(output_dir, "transcripts")
+        self.collages_dir = os.path.join(output_dir, "collages")
         
         # Create output directories
         os.makedirs(self.twitter_dir, exist_ok=True)
         os.makedirs(self.tiktok_dir, exist_ok=True)
         os.makedirs(self.audio_dir, exist_ok=True)
         os.makedirs(self.transcripts_dir, exist_ok=True)
+        os.makedirs(self.collages_dir, exist_ok=True)
         
         # Initialize pipeline steps
         self.steps = self._create_default_steps()
@@ -52,7 +55,8 @@ class VideoProcessor:
             IdentifyPlatformStep(),
             DownloadVideoStep(output_dir=self.output_dir),
             ExtractAudioStep(output_dir=self.audio_dir),
-            TranscribeAudioStep(output_dir=self.transcripts_dir)
+            TranscribeAudioStep(output_dir=self.transcripts_dir),
+            CreateCollageStep(output_dir=self.collages_dir)
         ]
     
     def get_step(self, step_name: str) -> Optional[BaseStep]:
@@ -97,7 +101,7 @@ class VideoProcessor:
             self.steps.insert(position, step)
             logger.info(f"Added step '{step.name}' at position {position}")
     
-    def download_video(self, url: str, language_code: str = "es") -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    def download_video(self, url: str, language_code: str = "es") -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
         """Download and process a video from a URL.
         
         Args:
@@ -105,7 +109,7 @@ class VideoProcessor:
             language_code: The language code for transcription (default: es)
             
         Returns:
-            A tuple of (video_path, audio_path, srt_path), any of which may be None if that step failed
+            A tuple of (video_path, audio_path, srt_path, collage_path), any of which may be None if that step failed
         """
         # Initialize the context
         context = VideoContext(url=url)
@@ -120,4 +124,6 @@ class VideoProcessor:
                 logger.warning(f"Pipeline stopped due to errors: {context.errors}")
                 break
         
-        return context.video_path, context.audio_path, context.srt_path 
+        logger.info(f"Pipeline completed. Results: video_path={context.video_path}, audio_path={context.audio_path}, srt_path={context.srt_path}, collage_path={context.collage_path}")
+        
+        return context.video_path, context.audio_path, context.srt_path, context.collage_path 
