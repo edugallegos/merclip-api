@@ -7,37 +7,65 @@ import yt_dlp
 
 logger = logging.getLogger(__name__)
 
-class TwitterDownloader:
-    def __init__(self, output_dir: str = "generated_images/twitter_videos"):
+class VideoDownloader:
+    def __init__(self, output_dir: str = "generated_images/videos"):
         self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
-        logger.info(f"TwitterDownloader initialized with output directory: {output_dir}")
+        self.twitter_dir = os.path.join(output_dir, "twitter")
+        self.tiktok_dir = os.path.join(output_dir, "tiktok")
+        os.makedirs(self.twitter_dir, exist_ok=True)
+        os.makedirs(self.tiktok_dir, exist_ok=True)
+        logger.info(f"VideoDownloader initialized with output directory: {output_dir}")
 
-    def _get_unique_filename(self, tweet_id: str) -> str:
-        """Generate a unique filename for the downloaded video based on tweet ID."""
+    def _get_unique_filename(self, video_id: str) -> str:
+        """Generate a unique filename for the downloaded video based on video ID."""
         unique_id = uuid.uuid4().hex[:8]
-        return f"{tweet_id}_{unique_id}"
+        return f"{video_id}_{unique_id}"
     
-    def download_video(self, tweet_url: str) -> Optional[str]:
-        """Download video from a tweet URL.
+    def _extract_video_id(self, url: str) -> tuple:
+        """Extract video ID and platform from URL."""
+        if "twitter.com" in url or "x.com" in url:
+            video_id = url.split('/')[-1].split('?')[0]
+            return video_id, "twitter"
+        elif "tiktok.com" in url:
+            # TikTok URLs can be in different formats
+            if "/video/" in url:
+                video_id = url.split('/video/')[-1].split('?')[0]
+            else:
+                # For share URLs like vm.tiktok.com/XXXXXXX/
+                video_id = url.split('/')[-1].split('?')[0]
+            return video_id, "tiktok"
+        else:
+            logger.error(f"Invalid URL format: {url}")
+            return None, None
+    
+    def download_video(self, url: str) -> Optional[str]:
+        """Download video from a Twitter or TikTok URL.
         
         Args:
-            tweet_url: The URL of the tweet containing the video
+            url: The URL of the post containing the video
             
         Returns:
             The path to the downloaded video file, or None if download failed
         """
         try:
-            # Extract tweet ID from URL
-            if "twitter.com" in tweet_url or "x.com" in tweet_url:
-                tweet_id = tweet_url.split('/')[-1].split('?')[0]
+            # Extract video ID and platform from URL
+            video_id, platform = self._extract_video_id(url)
+            
+            if not video_id:
+                return None
+            
+            # Set the appropriate output directory
+            if platform == "twitter":
+                output_dir = self.twitter_dir
+            elif platform == "tiktok":
+                output_dir = self.tiktok_dir
             else:
-                logger.error(f"Invalid Twitter URL format: {tweet_url}")
+                logger.error(f"Unsupported platform: {platform}")
                 return None
             
             # Create a unique filename for this download
-            filename = self._get_unique_filename(tweet_id)
-            output_path = os.path.join(self.output_dir, filename)
+            filename = self._get_unique_filename(video_id)
+            output_path = os.path.join(output_dir, filename)
             
             # Configure yt-dlp options
             ydl_opts = {
@@ -48,18 +76,21 @@ class TwitterDownloader:
             }
             
             # Download the video
-            logger.info(f"Starting download for tweet: {tweet_url}")
+            logger.info(f"Starting download for {platform} video: {url}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(tweet_url, download=True)
+                info = ydl.extract_info(url, download=True)
                 if info:
                     # Get the actual filename with extension
                     downloaded_path = f"{output_path}.{info.get('ext', 'mp4')}"
-                    logger.info(f"Successfully downloaded video to: {downloaded_path}")
+                    logger.info(f"Successfully downloaded {platform} video to: {downloaded_path}")
                     return downloaded_path
                 else:
-                    logger.error(f"No video information found for tweet: {tweet_url}")
+                    logger.error(f"No video information found for {platform} video: {url}")
                     return None
                     
         except Exception as e:
-            logger.error(f"Error downloading Twitter video: {str(e)}")
-            return None 
+            logger.error(f"Error downloading video: {str(e)}")
+            return None
+
+# For backward compatibility
+TwitterDownloader = VideoDownloader 
