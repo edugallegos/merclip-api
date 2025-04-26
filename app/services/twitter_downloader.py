@@ -1,12 +1,24 @@
 import os
 import uuid
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any, List, Callable
 import snscrape.modules.twitter as sntwitter
 import yt_dlp
 import subprocess
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class VideoContext:
+    """Data container for passing information between pipeline steps."""
+    url: str
+    video_id: Optional[str] = None
+    platform: Optional[str] = None
+    video_path: Optional[str] = None
+    audio_path: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
 
 class VideoDownloader:
     def __init__(self, output_dir: str = "generated_images/videos"):
@@ -17,6 +29,21 @@ class VideoDownloader:
         os.makedirs(self.twitter_dir, exist_ok=True)
         os.makedirs(self.tiktok_dir, exist_ok=True)
         os.makedirs(self.audio_dir, exist_ok=True)
+        
+        # Define the default pipeline steps
+        self.pipeline_steps = [
+            self._identify_platform,
+            self._download_video,
+            self._extract_audio
+        ]
+        
+        # Step configuration (enabled/disabled)
+        self.step_config = {
+            "identify_platform": True,
+            "download_video": True,
+            "extract_audio": True
+        }
+        
         logger.info(f"VideoDownloader initialized with output directory: {output_dir}")
 
     def _get_unique_filename(self, video_id: str) -> str:
@@ -24,47 +51,114 @@ class VideoDownloader:
         unique_id = uuid.uuid4().hex[:8]
         return f"{video_id}_{unique_id}"
     
-    def _extract_video_id(self, url: str) -> tuple:
-        """Extract video ID and platform from URL."""
-        if "twitter.com" in url or "x.com" in url:
-            video_id = url.split('/')[-1].split('?')[0]
-            return video_id, "twitter"
-        elif "tiktok.com" in url:
-            # TikTok URLs can be in different formats
-            if "/video/" in url:
-                video_id = url.split('/video/')[-1].split('?')[0]
-            else:
-                # For share URLs like vm.tiktok.com/XXXXXXX/
-                video_id = url.split('/')[-1].split('?')[0]
-            return video_id, "tiktok"
-        else:
-            logger.error(f"Invalid URL format: {url}")
-            return None, None
-    
-    def extract_audio(self, video_path: str) -> Optional[str]:
-        """
-        Extract audio from video and save as MP3.
-        
-        Args:
-            video_path: Path to the video file
+    def _identify_platform(self, context: VideoContext) -> VideoContext:
+        """Identify platform and extract video ID from URL."""
+        if not self.step_config["identify_platform"]:
+            logger.info("Platform identification step disabled")
+            return context
             
-        Returns:
-            The path to the extracted audio file, or None if extraction failed
-        """
         try:
-            if not os.path.exists(video_path):
-                logger.error(f"Video file not found: {video_path}")
-                return None
-                
+            url = context.url
+            if "twitter.com" in url or "x.com" in url:
+                video_id = url.split('/')[-1].split('?')[0]
+                context.video_id = video_id
+                context.platform = "twitter"
+                logger.info(f"Identified as Twitter video: {video_id}")
+            elif "tiktok.com" in url:
+                # TikTok URLs can be in different formats
+                if "/video/" in url:
+                    video_id = url.split('/video/')[-1].split('?')[0]
+                else:
+                    # For share URLs like vm.tiktok.com/XXXXXXX/
+                    video_id = url.split('/')[-1].split('?')[0]
+                context.video_id = video_id
+                context.platform = "tiktok"
+                logger.info(f"Identified as TikTok video: {video_id}")
+            else:
+                error_msg = f"Unsupported platform for URL: {url}"
+                logger.error(error_msg)
+                context.errors.append(error_msg)
+        except Exception as e:
+            error_msg = f"Error identifying platform: {str(e)}"
+            logger.error(error_msg)
+            context.errors.append(error_msg)
+            
+        return context
+    
+    def _download_video(self, context: VideoContext) -> VideoContext:
+        """Download video from identified platform."""
+        if not self.step_config["download_video"]:
+            logger.info("Video download step disabled")
+            return context
+            
+        # Skip if there were errors or if platform/video_id is missing
+        if context.errors or not context.platform or not context.video_id:
+            return context
+            
+        try:
+            # Set the appropriate output directory
+            if context.platform == "twitter":
+                output_dir = self.twitter_dir
+            elif context.platform == "tiktok":
+                output_dir = self.tiktok_dir
+            else:
+                error_msg = f"Unsupported platform: {context.platform}"
+                logger.error(error_msg)
+                context.errors.append(error_msg)
+                return context
+            
+            # Create a unique filename for this download
+            filename = self._get_unique_filename(context.video_id)
+            output_path = os.path.join(output_dir, filename)
+            
+            # Configure yt-dlp options
+            ydl_opts = {
+                'format': 'best',
+                'outtmpl': f"{output_path}.%(ext)s",
+                'quiet': True,
+                'no_warnings': True,
+            }
+            
+            # Download the video
+            logger.info(f"Starting download for {context.platform} video: {context.url}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(context.url, download=True)
+                if info:
+                    # Get the actual filename with extension
+                    context.video_path = f"{output_path}.{info.get('ext', 'mp4')}"
+                    context.metadata["video_info"] = info
+                    logger.info(f"Successfully downloaded {context.platform} video to: {context.video_path}")
+                else:
+                    error_msg = f"No video information found for {context.platform} video: {context.url}"
+                    logger.error(error_msg)
+                    context.errors.append(error_msg)
+        except Exception as e:
+            error_msg = f"Error downloading video: {str(e)}"
+            logger.error(error_msg)
+            context.errors.append(error_msg)
+            
+        return context
+    
+    def _extract_audio(self, context: VideoContext) -> VideoContext:
+        """Extract audio from downloaded video."""
+        if not self.step_config["extract_audio"]:
+            logger.info("Audio extraction step disabled")
+            return context
+            
+        # Skip if there were errors or if video_path is missing
+        if context.errors or not context.video_path or not os.path.exists(context.video_path):
+            return context
+            
+        try:
             # Generate output filename for audio
-            basename = os.path.basename(video_path).split('.')[0]
+            basename = os.path.basename(context.video_path).split('.')[0]
             audio_path = os.path.join(self.audio_dir, f"{basename}.mp3")
             
             # Use FFmpeg to extract audio
-            logger.info(f"Extracting audio from {video_path} to {audio_path}")
+            logger.info(f"Extracting audio from {context.video_path} to {audio_path}")
             command = [
                 "ffmpeg", 
-                "-i", video_path,
+                "-i", context.video_path,
                 "-vn",  # No video
                 "-acodec", "libmp3lame",
                 "-ab", "192k",
@@ -82,18 +176,38 @@ class VideoDownloader:
             )
             
             if process.returncode != 0:
-                logger.error(f"FFmpeg error: {process.stderr}")
-                return None
+                error_msg = f"FFmpeg error: {process.stderr}"
+                logger.error(error_msg)
+                context.errors.append(error_msg)
+            else:
+                context.audio_path = audio_path
+                logger.info(f"Successfully extracted audio to: {audio_path}")
                 
-            logger.info(f"Successfully extracted audio to: {audio_path}")
-            return audio_path
-            
         except Exception as e:
-            logger.error(f"Error extracting audio: {str(e)}")
-            return None
+            error_msg = f"Error extracting audio: {str(e)}"
+            logger.error(error_msg)
+            context.errors.append(error_msg)
+            
+        return context
+    
+    def enable_step(self, step_name: str, enabled: bool = True) -> None:
+        """Enable or disable a specific pipeline step."""
+        if step_name in self.step_config:
+            self.step_config[step_name] = enabled
+            logger.info(f"Step '{step_name}' {'enabled' if enabled else 'disabled'}")
+        else:
+            logger.error(f"Unknown step name: {step_name}")
+    
+    def add_custom_step(self, step_function: Callable[[VideoContext], VideoContext], position: int = -1) -> None:
+        """Add a custom step to the pipeline at the specified position."""
+        if position < 0 or position >= len(self.pipeline_steps):
+            self.pipeline_steps.append(step_function)
+        else:
+            self.pipeline_steps.insert(position, step_function)
+        logger.info(f"Added custom step at position {position if position >= 0 else 'end'}")
     
     def download_video(self, url: str) -> Tuple[Optional[str], Optional[str]]:
-        """Download video from a Twitter or TikTok URL and extract audio.
+        """Process video through the pipeline.
         
         Args:
             url: The URL of the post containing the video
@@ -103,53 +217,19 @@ class VideoDownloader:
             - The path to the downloaded video file, or None if download failed
             - The path to the extracted audio file, or None if extraction failed
         """
-        try:
-            # Extract video ID and platform from URL
-            video_id, platform = self._extract_video_id(url)
+        # Initialize context
+        context = VideoContext(url=url)
+        
+        # Run through pipeline steps
+        for step in self.pipeline_steps:
+            context = step(context)
             
-            if not video_id:
-                return None, None
-            
-            # Set the appropriate output directory
-            if platform == "twitter":
-                output_dir = self.twitter_dir
-            elif platform == "tiktok":
-                output_dir = self.tiktok_dir
-            else:
-                logger.error(f"Unsupported platform: {platform}")
-                return None, None
-            
-            # Create a unique filename for this download
-            filename = self._get_unique_filename(video_id)
-            output_path = os.path.join(output_dir, filename)
-            
-            # Configure yt-dlp options
-            ydl_opts = {
-                'format': 'best',
-                'outtmpl': f"{output_path}.%(ext)s",
-                'quiet': True,
-                'no_warnings': True,
-            }
-            
-            # Download the video
-            logger.info(f"Starting download for {platform} video: {url}")
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                if info:
-                    # Get the actual filename with extension
-                    downloaded_path = f"{output_path}.{info.get('ext', 'mp4')}"
-                    logger.info(f"Successfully downloaded {platform} video to: {downloaded_path}")
-                    
-                    # Extract audio from the video
-                    audio_path = self.extract_audio(downloaded_path)
-                    return downloaded_path, audio_path
-                else:
-                    logger.error(f"No video information found for {platform} video: {url}")
-                    return None, None
-                    
-        except Exception as e:
-            logger.error(f"Error downloading video: {str(e)}")
-            return None, None
+            # Stop processing if there are errors
+            if context.errors:
+                logger.warning(f"Pipeline stopped due to errors: {context.errors}")
+                break
+        
+        return context.video_path, context.audio_path
 
 # For backward compatibility
 TwitterDownloader = VideoDownloader 

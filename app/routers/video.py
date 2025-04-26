@@ -3,7 +3,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 import os
 import logging
-from typing import Optional
+from typing import Optional, List
 from app.services.twitter_downloader import VideoDownloader
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,10 @@ router = APIRouter(
 # Initialize the VideoDownloader service
 video_downloader = VideoDownloader()
 
+# Configure pipeline steps as needed
+# Example: Disable audio extraction
+# video_downloader.enable_step("extract_audio", False)
+
 class VideoRequest(BaseModel):
     url: HttpUrl
     
@@ -28,14 +32,15 @@ class VideoResponse(BaseModel):
     audio_path: Optional[str] = None
     audio_url: Optional[str] = None
     platform: Optional[str] = None
+    errors: List[str] = []
     
 @router.post("/download", response_model=VideoResponse)
 async def download_video(request: VideoRequest, request_info: Request):
     """
-    Download a video from a Twitter/X or TikTok post URL and extract audio if available.
+    Download a video from a Twitter/X or TikTok post URL.
     """
     try:
-        # Determine platform from URL
+        # Determine platform from URL for response
         url = str(request.url)
         platform = "unknown"
         if "twitter.com" in url or "x.com" in url:
@@ -43,7 +48,7 @@ async def download_video(request: VideoRequest, request_info: Request):
         elif "tiktok.com" in url:
             platform = "tiktok"
         
-        # Download the video and extract audio
+        # Download the video through the pipeline
         file_path, audio_path = video_downloader.download_video(url)
         
         if file_path and os.path.exists(file_path):
