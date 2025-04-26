@@ -3,10 +3,10 @@ import subprocess
 import glob
 import shutil
 from typing import Optional
-from app.services.video_pipeline.steps.base_step import BaseStep
+from app.services.video_pipeline.steps.base_step import NonCriticalStep
 from app.services.video_pipeline.context import VideoContext
 
-class CreateCollageStep(BaseStep):
+class CreateCollageStep(NonCriticalStep):
     """Step to create a collage of video frames."""
     
     def __init__(self, output_dir: str = "generated_images/videos/collages", enabled: bool = True):

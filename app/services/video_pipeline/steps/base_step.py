@@ -63,4 +63,38 @@ class BaseStep(ABC):
         Returns:
             The updated video context
         """
-        pass 
+        pass
+
+class NonCriticalStep(BaseStep):
+    """Base class for non-critical pipeline steps.
+    
+    Non-critical steps will continue to run even if the context has errors from previous steps.
+    This is useful for steps like collage creation that can run independently of other steps.
+    """
+    
+    def __call__(self, context: VideoContext) -> VideoContext:
+        """Make the step callable.
+        
+        This method handles common logic like checking if the step is enabled
+        before delegating to the actual process method. It does NOT skip on previous errors.
+        
+        Args:
+            context: The video context to process
+            
+        Returns:
+            The updated video context
+        """
+        if not self.enabled:
+            self.logger.info(f"Step {self.name} is disabled, skipping")
+            return context
+        
+        # This step will run even if there are previous errors
+        
+        self.logger.info(f"Running step {self.name} (even with previous errors)")
+        try:
+            return self.process(context)
+        except Exception as e:
+            error_msg = f"Error in step {self.name}: {str(e)}"
+            self.logger.error(error_msg)
+            context.add_error(error_msg)
+            return context 

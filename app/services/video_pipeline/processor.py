@@ -117,12 +117,21 @@ class VideoProcessor:
         
         # Run the pipeline
         for step in self.steps:
+            # Keep track of errors before this step
+            previous_errors = context.errors.copy()
+            
+            # Run the step
             context = step(context)
             
-            # Break if there are errors
-            if context.has_errors():
-                logger.warning(f"Pipeline stopped due to errors: {context.errors}")
+            # Only break on critical early steps (platform identification, download, or audio extraction)
+            if context.has_errors() and step.name in ["identify_platform", "download_video", "extract_audio"]:
+                logger.warning(f"Pipeline stopped due to critical error in {step.name}: {context.errors}")
                 break
+                
+            # For non-critical steps (transcription, collage), log errors but continue
+            if context.has_errors() and len(context.errors) > len(previous_errors):
+                new_errors = context.errors[len(previous_errors):]
+                logger.warning(f"Non-critical errors in {step.name}, continuing pipeline: {new_errors}")
         
         logger.info(f"Pipeline completed. Results: video_path={context.video_path}, audio_path={context.audio_path}, srt_path={context.srt_path}, collage_path={context.collage_path}")
         

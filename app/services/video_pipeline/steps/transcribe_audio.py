@@ -80,17 +80,29 @@ class TranscribeAudioStep(BaseStep):
             
             # Get the transcript text and SRT
             context.transcript_text = transcript.text
-            context.transcript_srt = transcript.export_subtitles_srt()
             
-            # Save SRT to file
-            basename = os.path.basename(context.audio_path).split('.')[0]
-            srt_path = os.path.join(self.transcripts_dir, f"{basename}.srt")
-            
-            with open(srt_path, 'w', encoding='utf-8') as f:
-                f.write(context.transcript_srt)
+            # If transcript text is empty, warn but don't treat as error
+            if not context.transcript_text or context.transcript_text.strip() == "":
+                self.logger.warning("Transcription resulted in empty text, skipping SRT generation")
+                return context
                 
-            context.srt_path = srt_path
-            self.logger.info(f"Successfully saved transcript SRT to: {srt_path}")
+            # Only try to get SRT if there's actual text
+            try:
+                context.transcript_srt = transcript.export_subtitles_srt()
+                
+                # Save SRT to file
+                basename = os.path.basename(context.audio_path).split('.')[0]
+                srt_path = os.path.join(self.transcripts_dir, f"{basename}.srt")
+                
+                with open(srt_path, 'w', encoding='utf-8') as f:
+                    f.write(context.transcript_srt)
+                    
+                context.srt_path = srt_path
+                self.logger.info(f"Successfully saved transcript SRT to: {srt_path}")
+            except Exception as e:
+                warning_msg = f"Warning: Unable to generate SRT file: {str(e)}"
+                self.logger.warning(warning_msg)
+                # Don't add to errors, just log a warning
             
         except Exception as e:
             error_msg = f"Error transcribing audio: {str(e)}"

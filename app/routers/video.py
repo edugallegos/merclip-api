@@ -1,10 +1,14 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 import os
 import logging
 from typing import Optional, List
 from app.services.video_pipeline import VideoProcessor
+from app.services.video_manager import VideoManager
+from app.models.video import ProcessedVideo, VideoStatusEnum
+from datetime import datetime
+import sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +18,9 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# Initialize the VideoProcessor
+# Initialize the VideoProcessor and VideoManager
 video_processor = VideoProcessor()
+video_manager = VideoManager()
 
 # Configure pipeline steps as needed
 # Example: Disable transcription
@@ -37,7 +42,18 @@ class VideoResponse(BaseModel):
     collage_path: Optional[str] = None
     collage_url: Optional[str] = None
     platform: Optional[str] = None
+    video_id: Optional[str] = None
     errors: List[str] = []
+
+class VideoListResponse(BaseModel):
+    videos: List[ProcessedVideo]
+    total: int
+    limit: int
+    offset: int
+    status: Optional[str] = None
+    
+class VideoStatusUpdate(BaseModel):
+    status: VideoStatusEnum
     
 @router.post("/download", response_model=VideoResponse)
 async def download_video(request: VideoRequest, request_info: Request):
@@ -93,6 +109,28 @@ async def download_video(request: VideoRequest, request_info: Request):
                 collage_filename = os.path.basename(collage_path)
                 collage_url = f"{base_url}video/serve-collage/{video_id}/{collage_filename}"
             
+            # Store the processed video in the database
+            now = datetime.utcnow()
+            processed_video = ProcessedVideo(
+                video_id=video_id,
+                url=str(request.url),
+                platform=platform,
+                file_path=file_path,
+                file_url=file_url,
+                audio_path=audio_path,
+                audio_url=audio_url,
+                srt_path=srt_path,
+                srt_url=srt_url,
+                collage_path=collage_path,
+                collage_url=collage_url,
+                status=VideoStatusEnum.PROCESSED,
+                created_at=now,
+                updated_at=now,
+                language_code=request.language_code
+            )
+            video_manager.save_video(processed_video)
+            logger.info(f"Saved processed video to database: {video_id}")
+            
             return VideoResponse(
                 status="success",
                 message=f"{platform.capitalize()} video processed successfully",
@@ -104,7 +142,8 @@ async def download_video(request: VideoRequest, request_info: Request):
                 srt_url=srt_url,
                 collage_path=collage_path,
                 collage_url=collage_url,
-                platform=platform
+                platform=platform,
+                video_id=video_id
             )
         else:
             raise HTTPException(
@@ -115,6 +154,63 @@ async def download_video(request: VideoRequest, request_info: Request):
     except Exception as e:
         logger.error(f"Error processing video download: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to download video: {str(e)}")
+
+@router.get("/library", response_model=VideoListResponse)
+async def list_videos(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status: Optional[str] = None
+):
+    """
+    List processed videos, optionally filtered by status.
+    Results are sorted by creation date (newest first).
+    """
+    try:
+        # Get count before applying limit and offset
+        conn = sqlite3.connect(str(video_manager.db_path))
+        cursor = conn.cursor()
+        
+        if status:
+            cursor.execute("SELECT COUNT(*) FROM processed_videos WHERE status = ?", (status,))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM processed_videos")
+        
+        total = cursor.fetchone()[0]
+        conn.close()
+        
+        # Get videos with limit and offset
+        videos = video_manager.get_videos(limit=limit, offset=offset, status=status)
+        
+        return VideoListResponse(
+            videos=videos,
+            total=total,
+            limit=limit,
+            offset=offset,
+            status=status
+        )
+    except Exception as e:
+        logger.error(f"Error listing videos: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to list videos: {str(e)}")
+
+@router.put("/status/{video_id}", response_model=ProcessedVideo)
+async def update_video_status(video_id: str, status_update: VideoStatusUpdate):
+    """
+    Update the status of a processed video.
+    This can be used to mark videos as DONE after they've been used.
+    """
+    try:
+        updated_video = video_manager.update_status(video_id, status_update.status)
+        
+        if not updated_video:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video not found with ID: {video_id}"
+            )
+        
+        return updated_video
+    except Exception as e:
+        logger.error(f"Error updating video status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update video status: {str(e)}")
 
 @router.get("/twitter/{video_id}")
 async def get_twitter_video(video_id: str):
@@ -207,7 +303,7 @@ async def serve_video(platform: str, video_id: str, filename: str):
     
     except Exception as e:
         logger.error(f"Error serving video file: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to serve video: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to serve video: {str(e)}") 
 
 @router.get("/serve-audio/{video_id}/{filename}")
 async def serve_audio(video_id: str, filename: str):
@@ -372,4 +468,24 @@ async def get_collage(video_id: str):
     
     except Exception as e:
         logger.error(f"Error retrieving collage: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve collage: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve collage: {str(e)}")
+
+@router.get("/library/{video_id}", response_model=ProcessedVideo)
+async def get_video_by_id(video_id: str):
+    """
+    Get details of a specific processed video by its ID.
+    Returns 404 if the video is not found.
+    """
+    try:
+        video = video_manager.get_video(video_id)
+        
+        if not video:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video not found with ID: {video_id}"
+            )
+        
+        return video
+    except Exception as e:
+        logger.error(f"Error retrieving video: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve video: {str(e)}") 
