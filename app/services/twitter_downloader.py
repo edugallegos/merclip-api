@@ -6,8 +6,21 @@ import snscrape.modules.twitter as sntwitter
 import yt_dlp
 import subprocess
 from dataclasses import dataclass, field
+import assemblyai as aai
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Configure AssemblyAI
+ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY")
+if ASSEMBLYAI_API_KEY:
+    aai.settings.api_key = ASSEMBLYAI_API_KEY
+    logger.info("AssemblyAI API key configured successfully")
+else:
+    logger.warning("ASSEMBLYAI_API_KEY environment variable is not set, transcription will be disabled")
 
 @dataclass
 class VideoContext:
@@ -17,6 +30,9 @@ class VideoContext:
     platform: Optional[str] = None
     video_path: Optional[str] = None
     audio_path: Optional[str] = None
+    transcript_text: Optional[str] = None
+    transcript_srt: Optional[str] = None
+    srt_path: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
 
@@ -26,22 +42,26 @@ class VideoDownloader:
         self.twitter_dir = os.path.join(output_dir, "twitter")
         self.tiktok_dir = os.path.join(output_dir, "tiktok")
         self.audio_dir = os.path.join(output_dir, "audio")
+        self.transcripts_dir = os.path.join(output_dir, "transcripts")
         os.makedirs(self.twitter_dir, exist_ok=True)
         os.makedirs(self.tiktok_dir, exist_ok=True)
         os.makedirs(self.audio_dir, exist_ok=True)
+        os.makedirs(self.transcripts_dir, exist_ok=True)
         
         # Define the default pipeline steps
         self.pipeline_steps = [
             self._identify_platform,
             self._download_video,
-            self._extract_audio
+            self._extract_audio,
+            self._transcribe_audio
         ]
         
         # Step configuration (enabled/disabled)
         self.step_config = {
             "identify_platform": True,
             "download_video": True,
-            "extract_audio": True
+            "extract_audio": True,
+            "transcribe_audio": ASSEMBLYAI_API_KEY is not None
         }
         
         logger.info(f"VideoDownloader initialized with output directory: {output_dir}")
@@ -190,6 +210,70 @@ class VideoDownloader:
             
         return context
     
+    def _transcribe_audio(self, context: VideoContext) -> VideoContext:
+        """Transcribe audio using AssemblyAI."""
+        if not self.step_config["transcribe_audio"]:
+            logger.info("Audio transcription step disabled")
+            return context
+            
+        # Skip if there were errors or if audio_path is missing
+        if (context.errors or not context.audio_path or 
+            not os.path.exists(context.audio_path) or not ASSEMBLYAI_API_KEY):
+            return context
+            
+        try:
+            logger.info(f"Starting transcription for audio: {context.audio_path}")
+            
+            # Convert local file path to a URL that AssemblyAI can access
+            # For local files, we need to upload them first
+            logger.info("Uploading audio file to AssemblyAI")
+            transcriber = aai.Transcriber()
+            audio_url = transcriber.upload_file(context.audio_path)
+            
+            # Create transcription config with Spanish language (can be configured)
+            language_code = context.metadata.get("language_code", "es")  # Default to Spanish
+            config = aai.TranscriptionConfig(
+                language_code=language_code,
+                punctuate=True,  # Enable automatic punctuation
+                format_text=True  # Enable text formatting
+            )
+            
+            # Create a transcriber object with config
+            transcriber = aai.Transcriber(config=config)
+            
+            # Start the transcription
+            logger.info("Submitting transcription job to AssemblyAI")
+            transcript = transcriber.transcribe(audio_url)
+            
+            if transcript.status == aai.TranscriptStatus.error:
+                error_message = transcript.error
+                logger.error(f"Transcription failed with error: {error_message}")
+                context.errors.append(f"Transcription failed: {error_message}")
+                return context
+            
+            logger.info("Transcription completed successfully")
+            
+            # Get the transcript text and SRT
+            context.transcript_text = transcript.text
+            context.transcript_srt = transcript.export_subtitles_srt()
+            
+            # Save SRT to file
+            basename = os.path.basename(context.audio_path).split('.')[0]
+            srt_path = os.path.join(self.transcripts_dir, f"{basename}.srt")
+            
+            with open(srt_path, 'w', encoding='utf-8') as f:
+                f.write(context.transcript_srt)
+                
+            context.srt_path = srt_path
+            logger.info(f"Successfully saved transcript SRT to: {srt_path}")
+            
+        except Exception as e:
+            error_msg = f"Error transcribing audio: {str(e)}"
+            logger.error(error_msg)
+            context.errors.append(error_msg)
+            
+        return context
+    
     def enable_step(self, step_name: str, enabled: bool = True) -> None:
         """Enable or disable a specific pipeline step."""
         if step_name in self.step_config:
@@ -206,19 +290,22 @@ class VideoDownloader:
             self.pipeline_steps.insert(position, step_function)
         logger.info(f"Added custom step at position {position if position >= 0 else 'end'}")
     
-    def download_video(self, url: str) -> Tuple[Optional[str], Optional[str]]:
+    def download_video(self, url: str, language_code: str = "es") -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Process video through the pipeline.
         
         Args:
             url: The URL of the post containing the video
+            language_code: The language code to use for transcription (default: es)
             
         Returns:
             Tuple with:
             - The path to the downloaded video file, or None if download failed
             - The path to the extracted audio file, or None if extraction failed
+            - The path to the transcript SRT file, or None if transcription failed
         """
         # Initialize context
         context = VideoContext(url=url)
+        context.metadata["language_code"] = language_code
         
         # Run through pipeline steps
         for step in self.pipeline_steps:
@@ -229,7 +316,7 @@ class VideoDownloader:
                 logger.warning(f"Pipeline stopped due to errors: {context.errors}")
                 break
         
-        return context.video_path, context.audio_path
+        return context.video_path, context.audio_path, context.srt_path
 
 # For backward compatibility
 TwitterDownloader = VideoDownloader 

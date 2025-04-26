@@ -23,6 +23,7 @@ video_downloader = VideoDownloader()
 
 class VideoRequest(BaseModel):
     url: HttpUrl
+    language_code: Optional[str] = "es"  # Default language for transcription
     
 class VideoResponse(BaseModel):
     status: str
@@ -31,6 +32,8 @@ class VideoResponse(BaseModel):
     file_url: Optional[str] = None
     audio_path: Optional[str] = None
     audio_url: Optional[str] = None
+    srt_path: Optional[str] = None
+    srt_url: Optional[str] = None
     platform: Optional[str] = None
     errors: List[str] = []
     
@@ -38,6 +41,7 @@ class VideoResponse(BaseModel):
 async def download_video(request: VideoRequest, request_info: Request):
     """
     Download a video from a Twitter/X or TikTok post URL.
+    Extracts audio and generates transcription if enabled.
     """
     try:
         # Determine platform from URL for response
@@ -49,7 +53,7 @@ async def download_video(request: VideoRequest, request_info: Request):
             platform = "tiktok"
         
         # Download the video through the pipeline
-        file_path, audio_path = video_downloader.download_video(url)
+        file_path, audio_path, srt_path = video_downloader.download_video(url, request.language_code)
         
         if file_path and os.path.exists(file_path):
             # Extract video_id and filename from the file_path
@@ -66,13 +70,21 @@ async def download_video(request: VideoRequest, request_info: Request):
                 audio_filename = os.path.basename(audio_path)
                 audio_url = f"{base_url}video/serve-audio/{video_id}/{audio_filename}"
             
+            # Generate SRT URL if transcription was successful
+            srt_url = None
+            if srt_path and os.path.exists(srt_path):
+                srt_filename = os.path.basename(srt_path)
+                srt_url = f"{base_url}video/serve-transcript/{video_id}/{srt_filename}"
+            
             return VideoResponse(
                 status="success",
-                message=f"{platform.capitalize()} video downloaded successfully",
+                message=f"{platform.capitalize()} video processed successfully",
                 file_path=file_path,
                 file_url=file_url,
                 audio_path=audio_path,
                 audio_url=audio_url,
+                srt_path=srt_path,
+                srt_url=srt_url,
                 platform=platform
             )
         else:
@@ -204,6 +216,32 @@ async def serve_audio(video_id: str, filename: str):
         logger.error(f"Error serving audio file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to serve audio: {str(e)}")
 
+@router.get("/serve-transcript/{video_id}/{filename}")
+async def serve_transcript(video_id: str, filename: str):
+    """
+    Serve a specific SRT transcript file by video ID and filename.
+    This endpoint provides direct access to the transcript file.
+    """
+    try:
+        transcript_dir = video_downloader.transcripts_dir
+        transcript_path = os.path.join(transcript_dir, filename)
+        
+        if os.path.exists(transcript_path) and filename.startswith(video_id):
+            return FileResponse(
+                path=transcript_path,
+                media_type="application/x-subrip",
+                filename=filename
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Transcript file not found: {filename}"
+            )
+    
+    except Exception as e:
+        logger.error(f"Error serving transcript file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to serve transcript: {str(e)}")
+
 @router.get("/audio/{video_id}")
 async def get_audio(video_id: str):
     """
@@ -231,4 +269,33 @@ async def get_audio(video_id: str):
     
     except Exception as e:
         logger.error(f"Error retrieving audio: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve audio: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve audio: {str(e)}")
+
+@router.get("/transcript/{video_id}")
+async def get_transcript(video_id: str):
+    """
+    Retrieve a previously generated transcript by video ID.
+    This endpoint will search for a matching SRT file and serve it.
+    """
+    try:
+        # Look for files with the video ID prefix in the transcripts output directory
+        transcript_dir = video_downloader.transcripts_dir
+        matching_files = [f for f in os.listdir(transcript_dir) if f.startswith(video_id)]
+        
+        if matching_files:
+            # Use the most recently created file if multiple exist
+            transcript_path = os.path.join(transcript_dir, matching_files[0])
+            return FileResponse(
+                path=transcript_path,
+                media_type="application/x-subrip",
+                filename=os.path.basename(transcript_path)
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No transcript found for video ID: {video_id}"
+            )
+    
+    except Exception as e:
+        logger.error(f"Error retrieving transcript: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve transcript: {str(e)}") 
