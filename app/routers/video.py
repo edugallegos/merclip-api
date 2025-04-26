@@ -25,12 +25,14 @@ class VideoResponse(BaseModel):
     message: str
     file_path: Optional[str] = None
     file_url: Optional[str] = None
+    audio_path: Optional[str] = None
+    audio_url: Optional[str] = None
     platform: Optional[str] = None
     
 @router.post("/download", response_model=VideoResponse)
 async def download_video(request: VideoRequest, request_info: Request):
     """
-    Download a video from a Twitter/X or TikTok post URL.
+    Download a video from a Twitter/X or TikTok post URL and extract audio if available.
     """
     try:
         # Determine platform from URL
@@ -41,8 +43,8 @@ async def download_video(request: VideoRequest, request_info: Request):
         elif "tiktok.com" in url:
             platform = "tiktok"
         
-        # Download the video
-        file_path = video_downloader.download_video(url)
+        # Download the video and extract audio
+        file_path, audio_path = video_downloader.download_video(url)
         
         if file_path and os.path.exists(file_path):
             # Extract video_id and filename from the file_path
@@ -53,11 +55,19 @@ async def download_video(request: VideoRequest, request_info: Request):
             base_url = str(request_info.base_url)
             file_url = f"{base_url}video/serve/{platform}/{video_id}/{filename}"
             
+            # Generate audio URL if audio was extracted
+            audio_url = None
+            if audio_path and os.path.exists(audio_path):
+                audio_filename = os.path.basename(audio_path)
+                audio_url = f"{base_url}video/serve-audio/{video_id}/{audio_filename}"
+            
             return VideoResponse(
                 status="success",
                 message=f"{platform.capitalize()} video downloaded successfully",
                 file_path=file_path,
                 file_url=file_url,
+                audio_path=audio_path,
+                audio_url=audio_url,
                 platform=platform
             )
         else:
@@ -161,4 +171,59 @@ async def serve_video(platform: str, video_id: str, filename: str):
     
     except Exception as e:
         logger.error(f"Error serving video file: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to serve video: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Failed to serve video: {str(e)}")
+
+@router.get("/serve-audio/{video_id}/{filename}")
+async def serve_audio(video_id: str, filename: str):
+    """
+    Serve a specific audio file by video ID and filename.
+    This endpoint provides direct access to the extracted audio file.
+    """
+    try:
+        audio_dir = video_downloader.audio_dir
+        audio_path = os.path.join(audio_dir, filename)
+        
+        if os.path.exists(audio_path) and filename.startswith(video_id):
+            return FileResponse(
+                path=audio_path,
+                media_type="audio/mpeg",
+                filename=filename
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Audio file not found: {filename}"
+            )
+    
+    except Exception as e:
+        logger.error(f"Error serving audio file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to serve audio: {str(e)}")
+
+@router.get("/audio/{video_id}")
+async def get_audio(video_id: str):
+    """
+    Retrieve a previously extracted audio by video ID.
+    This endpoint will search for a matching audio file and serve it.
+    """
+    try:
+        # Look for files with the video ID prefix in the audio output directory
+        audio_dir = video_downloader.audio_dir
+        matching_files = [f for f in os.listdir(audio_dir) if f.startswith(video_id)]
+        
+        if matching_files:
+            # Use the most recently created file if multiple exist
+            audio_path = os.path.join(audio_dir, matching_files[0])
+            return FileResponse(
+                path=audio_path,
+                media_type="audio/mpeg",
+                filename=os.path.basename(audio_path)
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No extracted audio found for video ID: {video_id}"
+            )
+    
+    except Exception as e:
+        logger.error(f"Error retrieving audio: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve audio: {str(e)}") 
