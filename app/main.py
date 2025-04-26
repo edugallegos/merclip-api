@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import sys
 import os
-from app.routers import example, transcription, image_generation, svg_generation, audio_processing
+from app.routers import example, transcription, image_generation, svg_generation, audio_processing, twitter_video
 
 # Configure logging
 logging.basicConfig(
@@ -20,6 +20,8 @@ logging.basicConfig(
 logging.getLogger('app.services.image_generator').setLevel(logging.DEBUG)
 logging.getLogger('app.routers.image_generation').setLevel(logging.DEBUG)
 logging.getLogger('app.routers.svg_generation').setLevel(logging.DEBUG)
+logging.getLogger('app.services.twitter_downloader').setLevel(logging.DEBUG)
+logging.getLogger('app.routers.twitter_video').setLevel(logging.DEBUG)
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
@@ -67,6 +69,7 @@ app.include_router(transcription.router)
 app.include_router(image_generation.router)
 app.include_router(svg_generation.router)
 app.include_router(audio_processing.router)
+app.include_router(twitter_video.router)
 
 @app.on_event("startup")
 async def startup_event():
