@@ -9,6 +9,7 @@ from app.services.video_manager import VideoManager
 from app.models.video import ProcessedVideo, VideoStatusEnum
 from datetime import datetime
 import sqlite3
+from app.utils.url import get_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ async def download_video(request: VideoRequest, request_info: Request):
             logger.info(f"Extracted video_id: {video_id} from filename: {filename}")
             
             # Generate URL for the file
-            base_url = str(request_info.base_url)
+            base_url = get_base_url(request_info)
             file_url = f"{base_url}video/serve/{platform}/{video_id}/{filename}"
             logger.debug(f"Generated file_url: {file_url}")
             

@@ -5,6 +5,7 @@ import os
 import logging
 from typing import Optional
 from app.services.twitter_downloader import VideoDownloader
+from app.utils.url import get_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ async def download_video(request: VideoRequest, request_info: Request):
             video_id = filename.split('_')[0]
             
             # Generate URL for the file
-            base_url = str(request_info.base_url)
+            base_url = get_base_url(request_info)
             file_url = f"{base_url}video/serve/{platform}/{video_id}/{filename}"
             
             return VideoResponse(
