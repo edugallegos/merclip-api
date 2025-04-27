@@ -457,7 +457,7 @@ async def get_tiktok_video(video_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to retrieve video: {str(e)}")
 
 @router.get("/serve/{platform}/{video_id}/{filename}")
-async def serve_video(platform: str, video_id: str, filename: str):
+async def serve_video(platform: str, video_id: str, filename: str, request: Request):
     """
     Serve a specific video file by platform, video ID, and filename.
     This endpoint provides direct access to the video file.
@@ -476,11 +476,27 @@ async def serve_video(platform: str, video_id: str, filename: str):
         video_path = os.path.join(video_dir, filename)
         
         if os.path.exists(video_path) and filename.startswith(video_id):
-            return FileResponse(
+            # Get the origin from the request headers
+            origin = request.headers.get("origin")
+            
+            # Create response with CORS headers
+            response = FileResponse(
                 path=video_path,
                 media_type="video/mp4",
                 filename=filename
             )
+            
+            # Add CORS headers manually
+            if origin:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+            else:
+                response.headers["Access-Control-Allow-Origin"] = "*"
+
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            
+            return response
         else:
             raise HTTPException(
                 status_code=404,
@@ -489,10 +505,10 @@ async def serve_video(platform: str, video_id: str, filename: str):
     
     except Exception as e:
         logger.error(f"Error serving video file: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to serve video: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Failed to serve video: {str(e)}")
 
 @router.get("/serve-audio/{video_id}/{filename}")
-async def serve_audio(video_id: str, filename: str):
+async def serve_audio(video_id: str, filename: str, request: Request):
     """
     Serve a specific audio file by video ID and filename.
     This endpoint provides direct access to the extracted audio file.
@@ -502,11 +518,23 @@ async def serve_audio(video_id: str, filename: str):
         audio_path = os.path.join(audio_dir, filename)
         
         if os.path.exists(audio_path) and filename.startswith(video_id):
-            return FileResponse(
+            # Get the origin from the request headers
+            origin = request.headers.get("origin", "*")
+            
+            # Create response with CORS headers
+            response = FileResponse(
                 path=audio_path,
                 media_type="audio/mpeg",
                 filename=filename
             )
+            
+            # Add CORS headers manually
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            
+            return response
         else:
             raise HTTPException(
                 status_code=404,
@@ -518,7 +546,7 @@ async def serve_audio(video_id: str, filename: str):
         raise HTTPException(status_code=500, detail=f"Failed to serve audio: {str(e)}")
 
 @router.get("/serve-transcript/{video_id}/{filename}")
-async def serve_transcript(video_id: str, filename: str):
+async def serve_transcript(video_id: str, filename: str, request: Request):
     """
     Serve a specific SRT transcript file by video ID and filename.
     This endpoint provides direct access to the transcript file.
@@ -528,11 +556,23 @@ async def serve_transcript(video_id: str, filename: str):
         transcript_path = os.path.join(transcript_dir, filename)
         
         if os.path.exists(transcript_path) and filename.startswith(video_id):
-            return FileResponse(
+            # Get the origin from the request headers
+            origin = request.headers.get("origin", "*")
+            
+            # Create response with CORS headers
+            response = FileResponse(
                 path=transcript_path,
                 media_type="application/x-subrip",
                 filename=filename
             )
+            
+            # Add CORS headers manually
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            
+            return response
         else:
             raise HTTPException(
                 status_code=404,
@@ -544,7 +584,7 @@ async def serve_transcript(video_id: str, filename: str):
         raise HTTPException(status_code=500, detail=f"Failed to serve transcript: {str(e)}")
 
 @router.get("/serve-collage/{video_id}/{filename}")
-async def serve_collage(video_id: str, filename: str):
+async def serve_collage(video_id: str, filename: str, request: Request):
     """
     Serve a specific collage image file by video ID and filename.
     This endpoint provides direct access to the collage image.
@@ -554,11 +594,23 @@ async def serve_collage(video_id: str, filename: str):
         collage_path = os.path.join(collage_dir, filename)
         
         if os.path.exists(collage_path) and filename.startswith(video_id):
-            return FileResponse(
+            # Get the origin from the request headers
+            origin = request.headers.get("origin", "*")
+            
+            # Create response with CORS headers
+            response = FileResponse(
                 path=collage_path,
                 media_type="image/jpeg",
                 filename=filename
             )
+            
+            # Add CORS headers manually
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            
+            return response
         else:
             raise HTTPException(
                 status_code=404,
