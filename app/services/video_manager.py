@@ -134,38 +134,76 @@ class VideoManager:
     
     def _video_from_row(self, row) -> ProcessedVideo:
         """Convert a database row to a ProcessedVideo object"""
-        try:
-            logger.debug(f"Processing database row for video_id: {row[0]}")
-            logger.debug(f"Metadata column (row[16]): {repr(row[16])}")
-            metadata = json.loads(row[16]) if row[16] else {}
-            logger.debug(f"Parsed metadata: {metadata}")
-        except json.JSONDecodeError as e:
-            logger.error(f"Error parsing metadata JSON for video_id {row[0]}: {str(e)}")
-            logger.error(f"Invalid metadata value: '{row[16]}'")
-            # Use empty dict as fallback
-            metadata = {}
+        # First get the column information to ensure correct mapping
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
         
-        video = ProcessedVideo(
-            video_id=row[0],
-            url=row[1],
-            platform=row[2],
-            file_path=row[3],
-            file_url=row[4],
-            audio_path=row[5],
-            audio_url=row[6],
-            srt_path=row[7],
-            srt_url=row[8],
-            collage_path=row[9],
-            collage_url=row[10],
-            status=VideoStatusEnum(row[11]),
-            created_at=datetime.fromisoformat(row[12]),
-            updated_at=datetime.fromisoformat(row[13]),
-            language_code=row[14],
-            ai_review=row[15],
-            metadata=metadata
-        )
-        logger.debug(f"Successfully converted database row to ProcessedVideo: {video.video_id}")
-        return video
+        try:
+            cursor.execute("PRAGMA table_info(processed_videos)")
+            columns = {row[1]: idx for idx, row in enumerate(cursor.fetchall())}
+            logger.debug(f"Column mapping: {columns}")
+            
+            # Get values by column name rather than assuming positions
+            video_id = row[columns.get("video_id", 0)]
+            url = row[columns.get("url", 1)]
+            platform = row[columns.get("platform", 2)]
+            file_path = row[columns.get("file_path", 3)]
+            file_url = row[columns.get("file_url", 4)]
+            audio_path = row[columns.get("audio_path", 5)]
+            audio_url = row[columns.get("audio_url", 6)]
+            srt_path = row[columns.get("srt_path", 7)]
+            srt_url = row[columns.get("srt_url", 8)]
+            collage_path = row[columns.get("collage_path", 9)]
+            collage_url = row[columns.get("collage_url", 10)]
+            status = row[columns.get("status", 11)]
+            created_at = row[columns.get("created_at", 12)]
+            updated_at = row[columns.get("updated_at", 13)]
+            language_code = row[columns.get("language_code", 14)]
+            ai_review = row[columns.get("ai_review", 15)]
+            metadata_json = row[columns.get("metadata", 16)]
+            
+            logger.debug(f"Row data for video_id {video_id}:")
+            logger.debug(f"  ai_review: {ai_review}")
+            logger.debug(f"  metadata_json: {metadata_json}")
+            
+            # Parse metadata with proper error handling
+            try:
+                metadata = json.loads(metadata_json) if metadata_json else {}
+                logger.debug(f"Parsed metadata: {metadata}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing metadata JSON for video_id {video_id}: {str(e)}")
+                logger.error(f"Invalid metadata value: '{metadata_json}'")
+                # Use empty dict as fallback
+                metadata = {}
+                
+            # Create the ProcessedVideo object with explicitly mapped fields
+            video = ProcessedVideo(
+                video_id=video_id,
+                url=url,
+                platform=platform,
+                file_path=file_path,
+                file_url=file_url,
+                audio_path=audio_path,
+                audio_url=audio_url,
+                srt_path=srt_path,
+                srt_url=srt_url,
+                collage_path=collage_path,
+                collage_url=collage_url,
+                status=VideoStatusEnum(status),
+                created_at=datetime.fromisoformat(created_at),
+                updated_at=datetime.fromisoformat(updated_at),
+                language_code=language_code,
+                ai_review=ai_review,
+                metadata=metadata
+            )
+            logger.debug(f"Successfully converted database row to ProcessedVideo: {video.video_id}")
+            return video
+            
+        except Exception as e:
+            logger.error(f"Error in _video_from_row: {str(e)}")
+            raise
+        finally:
+            conn.close()
     
     def save_video(self, video: ProcessedVideo) -> ProcessedVideo:
         """Save a processed video to the database"""
