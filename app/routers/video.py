@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Request, Query
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request, Query, Body
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 import os
@@ -57,6 +57,17 @@ class VideoListResponse(BaseModel):
 class VideoStatusUpdate(BaseModel):
     status: VideoStatusEnum
     
+class AIReviewUpdate(BaseModel):
+    ai_review: str
+    
+    class Config:
+        # Add example for documentation
+        schema_extra = {
+            "example": {
+                "ai_review": "This video contains educational content with a speaker explaining technical concepts."
+            }
+        }
+
 @router.post("/download", response_model=VideoResponse)
 async def download_video(request: VideoRequest, request_info: Request):
     """
@@ -65,6 +76,9 @@ async def download_video(request: VideoRequest, request_info: Request):
     Returns SRT content as string when available.
     """
     try:
+        logger.info(f"Received video download request for URL: {request.url}")
+        logger.info(f"Language code: {request.language_code}")
+        
         # Determine platform from URL for response
         url = str(request.url)
         platform = "unknown"
@@ -73,8 +87,14 @@ async def download_video(request: VideoRequest, request_info: Request):
         elif "tiktok.com" in url:
             platform = "tiktok"
         
+        logger.info(f"Detected platform: {platform}")
+        
         # Download the video through the extended pipeline
+        logger.info("Starting video download and processing pipeline")
         result = video_processor.download_video_extended(url, request.language_code)
+        
+        logger.debug(f"Pipeline result keys: {', '.join(result.keys())}")
+        
         file_path = result["video_path"]
         audio_path = result["audio_path"]
         srt_path = result["srt_path"]
@@ -82,65 +102,101 @@ async def download_video(request: VideoRequest, request_info: Request):
         srt_content = result["srt_content"]
         transcript_text = result["transcript_text"]
         
-        logger.info(f"Router received: file_path={file_path}, audio_path={audio_path}, srt_path={srt_path}, collage_path={collage_path}")
+        logger.info(f"Pipeline completed with results: file_path={file_path}, audio_path={audio_path}, srt_path={srt_path}, collage_path={collage_path}")
+        logger.debug(f"SRT content available: {srt_content is not None}")
+        logger.debug(f"Transcript text available: {transcript_text is not None}")
         
         # Explicit collage check
         if collage_path:
             if os.path.exists(collage_path):
-                logger.info(f"Router verified: Collage file exists at {collage_path}")
+                logger.info(f"Collage file exists at {collage_path}")
             else:
-                logger.warning(f"Router warning: Collage path was provided but file does not exist at {collage_path}")
+                logger.warning(f"Collage path was provided but file does not exist at {collage_path}")
         
         if file_path and os.path.exists(file_path):
             # Extract video_id and filename from the file_path
             filename = os.path.basename(file_path)
             video_id = filename.split('_')[0]
+            logger.info(f"Extracted video_id: {video_id} from filename: {filename}")
             
             # Generate URL for the file
             base_url = str(request_info.base_url)
             file_url = f"{base_url}video/serve/{platform}/{video_id}/{filename}"
+            logger.debug(f"Generated file_url: {file_url}")
             
             # Generate audio URL if audio was extracted
             audio_url = None
             if audio_path and os.path.exists(audio_path):
                 audio_filename = os.path.basename(audio_path)
                 audio_url = f"{base_url}video/serve-audio/{video_id}/{audio_filename}"
+                logger.debug(f"Generated audio_url: {audio_url}")
             
             # Generate SRT URL if transcription was successful
             srt_url = None
             if srt_path and os.path.exists(srt_path):
                 srt_filename = os.path.basename(srt_path)
                 srt_url = f"{base_url}video/serve-transcript/{video_id}/{srt_filename}"
+                logger.debug(f"Generated srt_url: {srt_url}")
             
             # Generate collage URL if collage was created
             collage_url = None
             if collage_path and os.path.exists(collage_path):
                 collage_filename = os.path.basename(collage_path)
                 collage_url = f"{base_url}video/serve-collage/{video_id}/{collage_filename}"
+                logger.debug(f"Generated collage_url: {collage_url}")
             
             # Store the processed video in the database
             now = datetime.utcnow()
-            processed_video = ProcessedVideo(
-                video_id=video_id,
-                url=str(request.url),
-                platform=platform,
-                file_path=file_path,
-                file_url=file_url,
-                audio_path=audio_path,
-                audio_url=audio_url,
-                srt_path=srt_path,
-                srt_url=srt_url,
-                collage_path=collage_path,
-                collage_url=collage_url,
-                status=VideoStatusEnum.PROCESSED,
-                created_at=now,
-                updated_at=now,
-                language_code=request.language_code
-            )
-            video_manager.save_video(processed_video)
-            logger.info(f"Saved processed video to database: {video_id}")
+            logger.info(f"Creating ProcessedVideo object for database storage")
+            try:
+                # Create a metadata dictionary with useful information
+                metadata = {
+                    "download_timestamp": now.isoformat(),
+                    "source": "api_download",
+                    "processed_at": now.isoformat(),
+                    "language": request.language_code,
+                    "has_transcript": srt_path is not None,
+                    "has_collage": collage_path is not None,
+                    "video_size": os.path.getsize(file_path) if file_path and os.path.exists(file_path) else 0
+                }
+                
+                logger.debug(f"Created metadata for ProcessedVideo: {metadata}")
+                
+                processed_video = ProcessedVideo(
+                    video_id=video_id,
+                    url=str(request.url),
+                    platform=platform,
+                    file_path=file_path,
+                    file_url=file_url,
+                    audio_path=audio_path,
+                    audio_url=audio_url,
+                    srt_path=srt_path,
+                    srt_url=srt_url,
+                    collage_path=collage_path,
+                    collage_url=collage_url,
+                    status=VideoStatusEnum.PROCESSED,
+                    created_at=now,
+                    updated_at=now,
+                    language_code=request.language_code,
+                    ai_review=None,
+                    metadata=metadata  # Use the explicitly created metadata dictionary
+                )
+                logger.debug(f"ProcessedVideo object created successfully")
+                logger.debug(f"ProcessedVideo metadata: {processed_video.metadata}")
+            except Exception as model_err:
+                logger.error(f"Error creating ProcessedVideo model: {str(model_err)}")
+                raise
             
-            return VideoResponse(
+            try:
+                logger.info(f"Saving video to database via VideoManager")
+                video_manager.save_video(processed_video)
+                logger.info(f"Successfully saved video to database: {video_id}")
+            except Exception as db_err:
+                logger.error(f"Error saving video to database: {str(db_err)}")
+                raise
+            
+            logger.info(f"Preparing response for video_id: {video_id}")
+            response = VideoResponse(
                 status="success",
                 message=f"{platform.capitalize()} video processed successfully",
                 file_path=file_path,
@@ -156,14 +212,20 @@ async def download_video(request: VideoRequest, request_info: Request):
                 platform=platform,
                 video_id=video_id
             )
+            logger.info(f"Download request completed successfully for URL: {request.url}")
+            return response
         else:
+            logger.error(f"File not found: file_path={file_path}, exists={os.path.exists(file_path) if file_path else False}")
             raise HTTPException(
                 status_code=404,
                 detail=f"No video found in the provided {platform} URL or download failed"
             )
     
     except Exception as e:
-        logger.error(f"Error processing video download: {str(e)}")
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"Error processing video download for URL {request.url}: {str(e)}")
+        logger.error(f"Error traceback: {error_trace}")
         raise HTTPException(status_code=500, detail=f"Failed to download video: {str(e)}")
 
 @router.get("/library", response_model=VideoListResponse)
@@ -222,6 +284,119 @@ async def update_video_status(video_id: str, status_update: VideoStatusUpdate):
     except Exception as e:
         logger.error(f"Error updating video status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to update video status: {str(e)}")
+
+@router.put("/ai-review/{video_id}", response_model=ProcessedVideo)
+async def update_ai_review(
+    video_id: str, 
+    review_update: AIReviewUpdate = Body(..., 
+        example={"ai_review": "This video contains educational content"})
+):
+    """
+    Update the AI review of a processed video.
+    This endpoint allows adding machine-generated analysis or review of the video content.
+    
+    Example request body:
+    ```json
+    {
+        "ai_review": "This video contains educational content with a speaker explaining technical concepts."
+    }
+    ```
+    """
+    try:
+        logger.info(f"Received AI review update request for video_id: {video_id}")
+        logger.debug(f"AI review content: {review_update.ai_review[:100]}...")  # Log first 100 chars
+        
+        updated_video = video_manager.update_ai_review(video_id, review_update.ai_review)
+        
+        if not updated_video:
+            logger.warning(f"Video not found with ID: {video_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video not found with ID: {video_id}"
+            )
+        
+        logger.info(f"Successfully updated AI review for video_id: {video_id}")
+        return updated_video
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"Error updating AI review for video_id {video_id}: {str(e)}")
+        logger.error(f"Request data type: {type(review_update)}")
+        logger.error(f"Error trace: {error_trace}")
+        raise HTTPException(status_code=500, detail=f"Failed to update AI review: {str(e)}")
+
+@router.put("/ai-review-raw/{video_id}")
+async def update_ai_review_raw(video_id: str, request: Request):
+    """
+    Raw endpoint for debugging - update the AI review of a processed video.
+    This accepts raw JSON and handles it manually to diagnose issues.
+    """
+    try:
+        logger.info(f"Received raw AI review update request for video_id: {video_id}")
+        
+        # Get the raw request body
+        try:
+            body_bytes = await request.body()
+            body_str = body_bytes.decode('utf-8')
+            logger.info(f"Raw request body: '{body_str}'")
+            
+            if not body_bytes:
+                return {"error": "Empty request body", "status": "failed"}
+            
+            # Try to parse as JSON
+            try:
+                import json
+                body_json = json.loads(body_str)
+                logger.info(f"Parsed JSON: {body_json}")
+                
+                # Extract ai_review field
+                if "ai_review" not in body_json:
+                    return {"error": "Missing 'ai_review' field", "status": "failed"}
+                
+                ai_review = body_json["ai_review"]
+                logger.info(f"Extracted ai_review value: '{ai_review}'")
+                
+                # Try to get the video first to see if that's where the error is
+                try:
+                    video = video_manager.get_video(video_id)
+                    if not video:
+                        return {"error": f"Video not found with ID: {video_id}", "status": "failed"}
+                    
+                    logger.info(f"Successfully retrieved video with ID: {video_id}")
+                    
+                    # Update the video
+                    try:
+                        updated_video = video_manager.update_ai_review(video_id, ai_review)
+                        logger.info(f"Successfully updated AI review for video_id: {video_id}")
+                        
+                        # Return a simplified response
+                        return {
+                            "status": "success", 
+                            "message": "AI review updated successfully",
+                            "video_id": video_id
+                        }
+                    except Exception as update_err:
+                        logger.error(f"Error in update_ai_review: {str(update_err)}")
+                        return {"error": f"Failed to update AI review: {str(update_err)}", "status": "failed"}
+                        
+                except Exception as get_err:
+                    logger.error(f"Error in get_video: {str(get_err)}")
+                    return {"error": f"Failed to get video: {str(get_err)}", "status": "failed"}
+                
+            except json.JSONDecodeError as json_err:
+                logger.error(f"JSON decode error: {str(json_err)}")
+                return {"error": f"Invalid JSON: {str(json_err)}", "status": "failed"}
+                
+        except Exception as req_err:
+            logger.error(f"Request body read error: {str(req_err)}")
+            return {"error": f"Failed to read request body: {str(req_err)}", "status": "failed"}
+            
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"Unexpected error in raw endpoint for video_id {video_id}: {str(e)}")
+        logger.error(f"Error trace: {error_trace}")
+        return {"error": f"Unexpected error: {str(e)}", "status": "failed"}
 
 @router.get("/twitter/{video_id}")
 async def get_twitter_video(video_id: str):

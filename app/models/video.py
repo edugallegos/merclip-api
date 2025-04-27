@@ -33,4 +33,5 @@ class ProcessedVideo(BaseModel):
     created_at: datetime
     updated_at: datetime
     language_code: str = "es"
+    ai_review: Optional[str] = None  # AI review/analysis of the video content
     metadata: Dict = {} 
