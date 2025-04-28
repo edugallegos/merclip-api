@@ -31,7 +31,7 @@ class VideoResponse(BaseModel):
 @router.post("/download", response_model=VideoResponse)
 async def download_video(request: VideoRequest, request_info: Request):
     """
-    Download a video from a Twitter/X or TikTok post URL.
+    Download a video from a Twitter/X, TikTok, or YouTube post URL.
     """
     try:
         # Determine platform from URL
@@ -41,6 +41,8 @@ async def download_video(request: VideoRequest, request_info: Request):
             platform = "twitter"
         elif "tiktok.com" in url:
             platform = "tiktok"
+        elif "youtube.com" in url or "youtu.be" in url:
+            platform = "youtube"
         
         # Download the video
         file_path = video_downloader.download_video(url)
@@ -129,6 +131,35 @@ async def get_tiktok_video(video_id: str):
         logger.error(f"Error retrieving TikTok video: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve video: {str(e)}")
 
+@router.get("/youtube/{video_id}")
+async def get_youtube_video(video_id: str):
+    """
+    Retrieve a previously downloaded YouTube video by video ID.
+    This endpoint will search for a matching video file and serve it.
+    """
+    try:
+        # Look for files with the video ID prefix in the YouTube output directory
+        video_dir = video_downloader.youtube_dir
+        matching_files = [f for f in os.listdir(video_dir) if f.startswith(video_id)]
+        
+        if matching_files:
+            # Use the most recently downloaded file if multiple exist
+            video_path = os.path.join(video_dir, matching_files[0])
+            return FileResponse(
+                path=video_path,
+                media_type="video/mp4",
+                filename=os.path.basename(video_path)
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No downloaded video found for YouTube video ID: {video_id}"
+            )
+    
+    except Exception as e:
+        logger.error(f"Error retrieving YouTube video: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve video: {str(e)}")
+
 @router.get("/serve/{platform}/{video_id}/{filename}")
 async def serve_video(platform: str, video_id: str, filename: str):
     """
@@ -140,6 +171,8 @@ async def serve_video(platform: str, video_id: str, filename: str):
             video_dir = video_downloader.twitter_dir
         elif platform == "tiktok":
             video_dir = video_downloader.tiktok_dir
+        elif platform == "youtube":
+            video_dir = video_downloader.youtube_dir
         else:
             raise HTTPException(
                 status_code=400,

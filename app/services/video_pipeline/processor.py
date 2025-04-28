@@ -30,6 +30,7 @@ class VideoProcessor:
         self.output_dir = output_dir
         self.twitter_dir = os.path.join(output_dir, "twitter")
         self.tiktok_dir = os.path.join(output_dir, "tiktok")
+        self.youtube_dir = os.path.join(output_dir, "youtube")
         self.audio_dir = os.path.join(output_dir, "audio")
         self.transcripts_dir = os.path.join(output_dir, "transcripts")
         self.collages_dir = os.path.join(output_dir, "collages")
@@ -37,6 +38,7 @@ class VideoProcessor:
         # Create output directories
         os.makedirs(self.twitter_dir, exist_ok=True)
         os.makedirs(self.tiktok_dir, exist_ok=True)
+        os.makedirs(self.youtube_dir, exist_ok=True)
         os.makedirs(self.audio_dir, exist_ok=True)
         os.makedirs(self.transcripts_dir, exist_ok=True)
         os.makedirs(self.collages_dir, exist_ok=True)

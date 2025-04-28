@@ -65,6 +65,38 @@ class IdentifyPlatformStep(BaseStep):
         
         return video_id
     
+    def _extract_youtube_id(self, url: str) -> str:
+        """Extract YouTube video ID from the URL.
+        
+        Args:
+            url: The YouTube URL
+            
+        Returns:
+            The extracted video ID
+        """
+        # Handle various YouTube URL formats
+        youtube_id = None
+        
+        # YouTube shorts format: youtube.com/shorts/VIDEO_ID
+        if "/shorts/" in url:
+            youtube_id = url.split('/shorts/')[-1].split('?')[0]
+        # Standard YouTube format: youtube.com/watch?v=VIDEO_ID
+        elif "youtube.com/watch" in url:
+            match = re.search(r'v=([a-zA-Z0-9_-]+)', url)
+            if match:
+                youtube_id = match.group(1)
+        # Shortened youtu.be format: youtu.be/VIDEO_ID
+        elif "youtu.be/" in url:
+            youtube_id = url.split('youtu.be/')[-1].split('?')[0]
+        
+        # If we still couldn't extract the ID, use a fallback
+        if not youtube_id:
+            import time
+            youtube_id = f"youtube_{int(time.time())}"
+            self.logger.warning(f"Could not extract YouTube video ID, using generated ID: {youtube_id}")
+            
+        return youtube_id
+    
     def process(self, context: VideoContext) -> VideoContext:
         """Process the video context to identify platform and extract video ID.
         
@@ -87,6 +119,12 @@ class IdentifyPlatformStep(BaseStep):
             context.video_id = video_id
             context.platform = "tiktok"
             self.logger.info(f"Identified as TikTok video: {video_id}")
+        elif "youtube.com" in url or "youtu.be" in url:
+            # Extract YouTube video ID using the dedicated method
+            video_id = self._extract_youtube_id(url)
+            context.video_id = video_id
+            context.platform = "youtube"
+            self.logger.info(f"Identified as YouTube video: {video_id}")
         else:
             error_msg = f"Unsupported platform for URL: {url}"
             self.logger.error(error_msg)

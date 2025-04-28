@@ -8,6 +8,23 @@ __pycache__/
 # C extensions
 *.so
 
+*.mp4
+*.mp3
+*.wav
+*.avi
+*.mkv
+*.flv
+*.mov
+*.m4a
+*.m4v
+*.webm
+*.wmv
+*.m4b
+*.m4p
+
+# Avoid cookies file
+cookies.txt
+
 # Distribution / packaging
 .Python
 build/
