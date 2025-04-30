@@ -179,7 +179,8 @@ class VideoProcessor:
             "srt_path": context.srt_path,
             "collage_path": context.collage_path,
             "transcript_text": context.transcript_text,
-            "srt_content": None
+            "srt_content": None,
+            "metadata": context.metadata  # Include metadata in the result
         }
         
         # Get SRT content if available

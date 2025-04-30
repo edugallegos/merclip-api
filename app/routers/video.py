@@ -152,8 +152,11 @@ async def download_video(request: VideoRequest, request_info: Request):
             now = datetime.utcnow()
             logger.info(f"Creating ProcessedVideo object for database storage")
             try:
-                # Create a metadata dictionary with useful information
-                metadata = {
+                # Get existing metadata from context if available
+                existing_metadata = result.get("metadata", {})
+                
+                # Create additional metadata with useful information
+                additional_metadata = {
                     "download_timestamp": now.isoformat(),
                     "source": "api_download",
                     "processed_at": now.isoformat(),
@@ -162,6 +165,9 @@ async def download_video(request: VideoRequest, request_info: Request):
                     "has_collage": collage_path is not None,
                     "video_size": os.path.getsize(file_path) if file_path and os.path.exists(file_path) else 0
                 }
+                
+                # Merge existing metadata with additional metadata
+                metadata = {**existing_metadata, **additional_metadata}
                 
                 logger.debug(f"Created metadata for ProcessedVideo: {metadata}")
                 

@@ -365,6 +365,26 @@ class VideoManager:
                 return None
             
             logger.debug(f"Found video with ID: {video_id}")
+            
+            # Get column information
+            cursor.execute("PRAGMA table_info(processed_videos)")
+            columns = {row[1]: idx for idx, row in enumerate(cursor.fetchall())}
+            
+            # Get metadata specifically
+            metadata_idx = columns.get("metadata")
+            if metadata_idx is not None:
+                metadata_json = row[metadata_idx]
+                logger.debug(f"Raw metadata from database: {metadata_json}")
+                try:
+                    metadata = json.loads(metadata_json) if metadata_json else {}
+                    logger.debug(f"Parsed metadata: {metadata}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Error parsing metadata JSON: {str(e)}")
+                    metadata = {}
+            else:
+                logger.error("Metadata column not found in database")
+                metadata = {}
+            
             return self._video_from_row(row)
         except sqlite3.Error as e:
             logger.error(f"SQLite error retrieving video {video_id}: {str(e)}")

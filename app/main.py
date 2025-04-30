@@ -9,7 +9,7 @@ from app.routers import example, transcription, image_generation, svg_generation
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO,  # Set to DEBUG to see all logs
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout)
@@ -22,7 +22,8 @@ logging.getLogger('app.routers.image_generation').setLevel(logging.DEBUG)
 logging.getLogger('app.routers.svg_generation').setLevel(logging.DEBUG)
 logging.getLogger('app.services.twitter_downloader').setLevel(logging.DEBUG)
 logging.getLogger('app.routers.twitter_video').setLevel(logging.DEBUG)
-logging.getLogger('app.services.video_manager').setLevel(logging.INFO)
+logging.getLogger('app.services.video_manager').setLevel(logging.DEBUG)  # Set to DEBUG
+logging.getLogger('app.services.video_pipeline').setLevel(logging.DEBUG)  # Add this line
 
 # Create logger for this module
 logger = logging.getLogger(__name__)

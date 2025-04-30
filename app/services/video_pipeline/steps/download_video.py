@@ -204,6 +204,11 @@ class DownloadVideoStep(BaseStep):
                     # Log the successful extraction
                     self.logger.info(f"Successfully extracted video info: {info.get('title', 'Unknown title')}")
                     
+                    # Log all available fields in info
+                    self.logger.info("Available fields in info dictionary:")
+                    for key, value in info.items():
+                        self.logger.info(f"  {key}: {value}")
+                    
                     # Get the actual filename with extension
                     if 'ext' in info:
                         context.video_path = f"{output_path}.{info['ext']}"
@@ -215,9 +220,14 @@ class DownloadVideoStep(BaseStep):
                     context.metadata["video_info"] = {
                         "title": info.get('title', ''),
                         "duration": info.get('duration', 0),
+                        "duration_seconds": info.get('duration', 0),  # Explicitly store duration in seconds
                         "format": info.get('format', ''),
                         "format_id": info.get('format_id', ''),
-                        "resolution": f"{info.get('width', 0)}x{info.get('height', 0)}"
+                        "resolution": f"{info.get('width', 0)}x{info.get('height', 0)}",
+                        "view_count": info.get('view_count', 0),
+                        "like_count": info.get('like_count', 0),
+                        "thumbnail": info.get('thumbnail', ''),
+                        "upload_date": info.get('upload_date', '')
                     }
                     
                     # Verify the file actually exists
