@@ -162,6 +162,34 @@ class DownloadVideoStep(BaseStep):
             # Only list formats if it's a YouTube Shorts (to debug format issues)
             if is_shorts and cookies_path:
                 self._list_formats(context.url, temp_cookies)
+        elif context.platform == "tiktok":
+            # Handle TikTok cookies
+            cookies_path = os.path.join("app", "utils", "cookies_tiktok.txt")
+            
+            if os.path.exists(cookies_path):
+                # Make a local copy of the cookies file in a temp dir to ensure file permissions
+                temp_dir = tempfile.mkdtemp(prefix="tiktok_cookies_")
+                temp_cookies = os.path.join(temp_dir, "cookies_tiktok.txt")
+                
+                try:
+                    # Copy the cookies file to our temp location with correct permissions
+                    shutil.copy2(cookies_path, temp_cookies)
+                    os.chmod(temp_cookies, 0o644)  # Ensure readable permissions
+                    
+                    self.logger.info(f"Using temporary TikTok cookies file at: {temp_cookies}")
+                    ydl_opts['cookiefile'] = temp_cookies
+                except Exception as e:
+                    self.logger.error(f"Error copying TikTok cookies file: {str(e)}")
+            else:
+                self.logger.warning("No TikTok cookies file found, downloads may fail")
+            
+            # Add TikTok-specific options
+            ydl_opts.update({
+                'format': 'best',  # Use best pre-merged format
+                'extractor_retries': 3,  # Retry extractor on failure
+                'fragment_retries': 10,  # Retry fragments on failure
+                'skip_unavailable_fragments': False,  # Don't skip unavailable fragments
+            })
         
         # Download the video
         self.logger.info(f"Starting download for {context.platform} video: {context.url}")
